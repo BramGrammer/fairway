@@ -3,8 +3,8 @@
 services:
   caddy:
     build: ./caddy
-    image: caddy-editor-dev-caddy:custom
-    container_name: caddy-editor-dev-caddy
+    image: fairway-dev-caddy:custom
+    container_name: fairway-dev-caddy
     command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     ports:
       - "127.0.0.1:8080:8080"
@@ -16,7 +16,7 @@ services:
 
   editor:
     build: ..
-    container_name: caddy-editor-dev
+    container_name: fairway-dev
     user: root
     environment:
       ADMIN_SOCKET: /run/caddy-admin/admin.sock

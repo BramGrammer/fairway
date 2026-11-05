@@ -1,6 +1,6 @@
-# Caddy Editor
+# Fairway
 
-A private web editor for the Caddyfile. Edit it in the browser, validate it against the running Caddy, and hot reload with no downtime. Keeps history with diff and rollback, and shows Caddy's logs.
+A private web interface for your Caddy reverse proxy. Edit the Caddyfile in the browser, validate it against the running Caddy, and hot reload with no downtime. See every site, handler and destination as a live traffic graph. Keeps history with diff and rollback, and shows Caddy's logs.
 
 Terminology is in [CONTEXT.md](CONTEXT.md). Design decisions are in [docs/adr](docs/adr).
 
@@ -23,7 +23,7 @@ The dev Caddy is built from `dev/caddy/Dockerfile`, the same plugin build as pro
 
 Validate, Format and Routes only read your Caddyfile (`/adapt` never applies it), so they are safe with a real one. Do not **Deploy** a production Caddyfile in dev: it would try to load real domains, certificates and storage.
 
-Editor: http://127.0.0.1:3000. The dev Caddy serves http://127.0.0.1:8080 and :8081. Change the response text in the editor, deploy, and watch `:8080` change with no restart. `npm run dev:down` stops it, `npm run dev:reset` also wipes its state.
+Fairway: http://127.0.0.1:3000. The dev Caddy serves http://127.0.0.1:8080 and :8081. Change the response text in the editor, deploy, and watch `:8080` change with no restart. `npm run dev:down` stops it, `npm run dev:reset` also wipes its state.
 
 Frontend work with hot reload: keep the dev stack running and start `npm run dev:web` (Vite on http://localhost:5173, proxying `/api` to the editor on :3000).
 
@@ -50,8 +50,8 @@ Then in Dockge create a stack from this folder, copy `.env.example` to `.env`, a
 
 | Profile (`COMPOSE_PROFILES`) | What you get |
 | --- | --- |
-| `local` (default) | Editor on `127.0.0.1:3000` of the NAS. Test through `ssh -L 3000:127.0.0.1:3000 your-nas`. No authentication. |
-| `tailscale` | Tailscale sidecar at `https://caddy-editor.<tailnet>.ts.net`, no published port, only `TS_ALLOWED_LOGIN` is let in. Needs `TS_AUTHKEY` (tagged `tag:caddy-editor`) and an ACL restricting that tag to your own devices. |
+| `local` (default) | Fairway on `127.0.0.1:3000` of the NAS. Test through `ssh -L 3000:127.0.0.1:3000 your-nas`. No authentication. |
+| `tailscale` | Tailscale sidecar at `https://fairway.<tailnet>.ts.net`, no published port, only `TS_ALLOWED_LOGIN` is let in. Needs `TS_AUTHKEY` (tagged `tag:fairway`) and an ACL restricting that tag to your own devices. |
 
 Switching is a one-line change to `COMPOSE_PROFILES`, then Deploy.
 

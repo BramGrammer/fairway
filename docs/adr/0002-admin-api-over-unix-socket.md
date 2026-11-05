@@ -1,6 +1,6 @@
 # Reach the admin API over a Unix socket
 
-Caddy's admin API is exposed as a Unix socket (`admin unix//run/caddy-admin/admin.sock|0660`) on a folder shared only with the Editor, instead of a TCP port.
+Caddy's admin API is exposed as a Unix socket (`admin unix//run/caddy-admin/admin.sock|0660`) on a folder shared only with Fairway, instead of a TCP port.
 
 ## Why
 
@@ -11,8 +11,8 @@ Caddy's admin API is exposed as a Unix socket (`admin unix//run/caddy-admin/admi
 ## Consequences
 
 - The published `2019:2019` port is removed from the Caddy stack.
-- Socket permissions must let the Editor's user connect. This is verified in the local dev mode before deploying.
-- Caddy recreates the socket on every start, so the Editor connects per request and does not hold a long-lived connection.
+- Socket permissions must let Fairway's user connect. This is verified in the local dev mode before deploying.
+- Caddy recreates the socket on every start, so Fairway connects per request and does not hold a long-lived connection.
 
 ## Considered
 

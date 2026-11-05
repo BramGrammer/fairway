@@ -41,6 +41,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
+import { FairwayLogo } from "@/components/fairway-logo"
 import { TopBarSlotProvider } from "@/components/top-bar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { EditorTab } from "@/features/editor-tab"
@@ -154,7 +155,7 @@ export default function App() {
           </EmptyMedia>
           <EmptyTitle>Access denied</EmptyTitle>
           <EmptyDescription>
-            This Tailscale user is not allowed to use the Caddy editor.
+            This Tailscale user is not allowed to use Fairway.
           </EmptyDescription>
         </EmptyHeader>
       </Empty>
@@ -169,11 +170,11 @@ export default function App() {
         <SidebarHeader>
           <div className="flex items-center gap-2 p-1">
             <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <FileCodeIcon className="size-4" />
+              <FairwayLogo className="size-5" />
             </div>
             <div className="flex min-w-0 flex-col leading-tight group-data-[collapsible=icon]:hidden">
-              <span className="truncate font-heading font-semibold">Caddy Editor</span>
-              <span className="truncate text-xs text-muted-foreground">Reverse proxy</span>
+              <span className="truncate font-heading font-semibold">Fairway</span>
+              <span className="truncate text-xs text-muted-foreground">Caddy control</span>
             </div>
           </div>
         </SidebarHeader>

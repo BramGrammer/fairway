@@ -20,20 +20,20 @@ services:
   editor:
     <<: *editor
     profiles: [local]
-    container_name: caddy-editor
+    container_name: fairway
     ports:
       - "${EDITOR_BIND:-127.0.0.1}:${EDITOR_PORT:-3000}:3000"
 
   tailscale:
     image: tailscale/tailscale:stable
     profiles: [tailscale]
-    container_name: caddy-editor-tailscale
-    hostname: caddy-editor
+    container_name: fairway-tailscale
+    hostname: fairway
     restart: unless-stopped
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY:-}
-      TS_HOSTNAME: caddy-editor
-      TS_EXTRA_ARGS: --advertise-tags=tag:caddy-editor
+      TS_HOSTNAME: fairway
+      TS_EXTRA_ARGS: --advertise-tags=tag:fairway
       TS_STATE_DIR: /var/lib/tailscale
       TS_USERSPACE: "true"
       TS_SERVE_CONFIG: /config/serve.json
@@ -44,7 +44,7 @@ services:
   editor-tailscale:
     <<: *editor
     profiles: [tailscale]
-    container_name: caddy-editor-app
+    container_name: fairway-app
     # Shares the sidecar's network, so there is no published port at all.
     network_mode: service:tailscale
     depends_on: [tailscale]

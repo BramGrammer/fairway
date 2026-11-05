@@ -1,6 +1,6 @@
 # Changes to the existing Caddy stack
 
-Apply these in Dockge to your Caddy stack before deploying the Editor. Nothing here is applied automatically.
+Apply these in Dockge to your Caddy stack before deploying Fairway. Nothing here is applied automatically.
 
 ## 1. Create the socket folder on the NAS
 
@@ -47,7 +47,7 @@ To show live per-site traffic on the Routes page, add this next to it (optional)
 
 It must be the global `metrics` option. Putting `metrics` inside `servers { }` is the older form and does not give per-host series in current Caddy. `per_host` adds one set of series per configured hostname, which is fine at this size.
 
-Restart the Caddy stack once. This is the last restart needed. After it, the Editor handles reloads.
+Restart the Caddy stack once. This is the last restart needed. After it, Fairway handles reloads.
 
 ## 4. Verify
 
@@ -55,7 +55,7 @@ Restart the Caddy stack once. This is the last restart needed. After it, the Edi
 ls -l /path/to/dockge/stacks/caddy/caddy/admin/
 ```
 
-`admin.sock` should exist. If the Editor cannot connect, check the socket's owner and mode first. Caddy runs as root in the official image, so the Editor either runs as root or the mode is widened.
+`admin.sock` should exist. If Fairway cannot connect, check the socket's owner and mode first. Caddy runs as root in the official image, so Fairway either runs as root or the mode is widened.
 
 ## Optional cleanup
 
