@@ -169,9 +169,7 @@ export default function App() {
       <Sidebar collapsible="icon" variant="inset">
         <SidebarHeader>
           <div className="flex items-center gap-2 p-1">
-            <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <FairwayLogo className="size-5" />
-            </div>
+            <FairwayLogo className="size-8 shrink-0 text-primary" />
             <div className="flex min-w-0 flex-col leading-tight group-data-[collapsible=icon]:hidden">
               <span className="truncate font-heading font-semibold">Fairway</span>
               <span className="truncate text-xs text-muted-foreground">Caddy control</span>
