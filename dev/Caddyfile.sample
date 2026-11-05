@@ -1,0 +1,22 @@
+{
+	admin unix//run/caddy-admin/admin.sock|0660
+	auto_https off
+
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+		format json
+	}
+}
+
+:8080 {
+	log
+	respond "hello from the dev caddy"
+}
+
+:8081 {
+	log
+	respond "a second site" 404
+}

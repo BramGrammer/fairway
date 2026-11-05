@@ -1,0 +1,32 @@
+{
+  "name": "caddy-editor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Private web editor for the Caddyfile with validate-and-hot-reload",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "npm run build:server && npm run build:web",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:web": "npm --prefix web run build && rm -rf dist/web && mkdir -p dist && cp -R web/dist dist/web",
+    "start": "node dist/server/index.js",
+    "typecheck": "tsc -p tsconfig.server.json --noEmit && npm --prefix web run typecheck",
+    "test": "tsx --test test/*.test.ts",
+    "dev:up": "sh dev/up.sh",
+    "dev:down": "docker compose -f dev/compose.yaml down",
+    "dev:reset": "docker compose -f dev/compose.yaml down -v && rm -rf dev/run",
+    "dev:web": "npm --prefix web run dev",
+    "postinstall": "npm --prefix web install"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.6",
+    "hono": "^4.13.16"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,35 @@
+# Throwaway Caddy plus the editor, to try everything without touching the real proxy.
+# Start with: npm run dev:up   (editor at http://127.0.0.1:3000, dev Caddy at :8080)
+services:
+  caddy:
+    image: caddy:2
+    container_name: caddy-editor-dev-caddy
+    command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - ./run/Caddyfile:/etc/caddy/Caddyfile
+      - admin-socket:/run/caddy-admin
+      - ./run/logs:/var/log/caddy
+
+  editor:
+    build: ..
+    container_name: caddy-editor-dev
+    user: root
+    environment:
+      ADMIN_SOCKET: /run/caddy-admin/admin.sock
+      CADDYFILE_PATH: /caddyfile/Caddyfile
+      LOG_DIR: /var/log/caddy
+      DATA_DIR: /data
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./run/Caddyfile:/caddyfile/Caddyfile
+      - admin-socket:/run/caddy-admin
+      - ./run/logs:/var/log/caddy:ro
+      - ./run/data:/data
+    depends_on: [caddy]
+
+volumes:
+  admin-socket:
