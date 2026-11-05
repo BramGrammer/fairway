@@ -1,6 +1,6 @@
 # Changes to the existing Caddy stack
 
-Apply these in Dockge to your Caddy stack before deploying Fairway. Nothing here is applied automatically.
+Apply these to your Caddy stack in Dockge before deploying Fairway. Nothing here is applied automatically.
 
 ## 1. Create the socket folder on the NAS
 
@@ -59,4 +59,4 @@ ls -l /path/to/dockge/stacks/caddy/caddy/admin/
 
 ## Optional cleanup
 
-If a site such as `app.example.com` has its own `log` block writing to `access.log` without the roll settings. Remove it and rely on the global `log` block to avoid two writers on one file.
+If a site such as `app.example.com` has its own `log` block writing to `access.log` without the roll settings, remove it and rely on the global `log` block to avoid two writers on one file.
