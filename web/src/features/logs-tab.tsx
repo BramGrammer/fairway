@@ -35,6 +35,7 @@ import { Separator } from "@/components/ui/separator"
 import { Toggle } from "@/components/ui/toggle"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { api } from "@/lib/api"
+import { PRESSED } from "@/lib/toggle-styles"
 import { cn } from "@/lib/utils"
 
 interface LogEntry {
@@ -47,9 +48,6 @@ interface LogEntry {
 }
 
 const MAX_ENTRIES = 2000
-/** This theme's muted is nearly white, so the default pressed look is invisible. */
-const PRESSED =
-  "aria-pressed:bg-primary aria-pressed:text-primary-foreground aria-pressed:hover:bg-primary/90 aria-pressed:hover:text-primary-foreground"
 const MAX_SHOWN = 1000
 const LEVELS = [
   { value: "all", label: "All levels" },

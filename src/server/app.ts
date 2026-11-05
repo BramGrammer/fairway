@@ -7,10 +7,14 @@ import type { Config } from "./config.js";
 import { DeployError, Deployer } from "./deploy.js";
 import { formatCaddyfile } from "./format.js";
 import { LogFollower, tailLines } from "./logs.js";
+import { MetricsTracker, WINDOWS_MS } from "./metrics.js";
+import { summarizeRoutes } from "./routes.js";
 import { Store } from "./store.js";
 
 export async function createApp(config: Config) {
   const admin = new CaddyAdmin(config.adminSocket);
+  const metrics = new MetricsTracker(admin);
+  metrics.start();
   const store = new Store(config.dataDir, config.maxRevisions);
   await store.init();
   const deployer = new Deployer(config.caddyfilePath, admin, store);
@@ -43,6 +47,20 @@ export async function createApp(config: Config) {
   app.post("/api/validate", async (c) => {
     const { text } = await c.req.json<{ text: string }>();
     return c.json(await deployer.validate(text));
+  });
+
+  // With `text`, shows what that Caddyfile would route; without, what Caddy is running now.
+  app.get("/api/metrics", (c) => {
+    const seconds = Number(c.req.query("window"));
+    const windowMs = WINDOWS_MS.find((ms) => ms === seconds * 1000) ?? WINDOWS_MS[0];
+    return c.json(metrics.snapshot(windowMs));
+  });
+
+  app.post("/api/routes", async (c) => {
+    const { text } = await c.req.json<{ text?: string }>().catch(() => ({ text: undefined }));
+    const result = text === undefined ? await admin.liveServers() : await admin.adaptedServers(text);
+    if (!result.ok) return c.json({ ok: false, error: result.error }, 502);
+    return c.json({ ok: true, source: text === undefined ? "running" : "editor", sites: summarizeRoutes(result.servers) });
   });
 
   app.post("/api/format", async (c) => {

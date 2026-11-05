@@ -5,6 +5,7 @@ import {
   FileCodeIcon,
   HistoryIcon,
   MoonIcon,
+  RouteIcon,
   ScrollTextIcon,
   ShieldAlertIcon,
   SunIcon,
@@ -45,14 +46,16 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { EditorTab } from "@/features/editor-tab"
 import { HistoryTab } from "@/features/history-tab"
 import { LogsTab } from "@/features/logs-tab"
+import { RoutesTab } from "@/features/routes-tab"
 import { useCaddyfile } from "@/hooks/use-caddyfile"
 import { useIsDark } from "@/hooks/use-is-dark"
 import { api, type StatusInfo } from "@/lib/api"
 
-type View = "editor" | "history" | "logs"
+type View = "editor" | "routes" | "history" | "logs"
 
 const NAV: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "editor", label: "Editor", icon: FileCodeIcon },
+  { id: "routes", label: "Routes", icon: RouteIcon },
   { id: "history", label: "History", icon: HistoryIcon },
   { id: "logs", label: "Logs", icon: ScrollTextIcon },
 ]
@@ -249,6 +252,12 @@ export default function App() {
             />
           )}
         </div>
+
+        {view === "routes" && (
+          <div className="min-h-0 flex-1">
+            <RoutesTab editorText={caddyfile.text} />
+          </div>
+        )}
 
         {view === "history" && (
           <div className="min-h-0 flex-1">

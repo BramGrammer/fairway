@@ -37,6 +37,16 @@ Add one line at the top of the existing `{ ... }` block:
      email you@example.com
 ```
 
+To show live per-site traffic on the Routes page, add this next to it (optional):
+
+```diff
++    metrics {
++        per_host
++    }
+```
+
+It must be the global `metrics` option. Putting `metrics` inside `servers { }` is the older form and does not give per-host series in current Caddy. `per_host` adds one set of series per configured hostname, which is fine at this size.
+
 Restart the Caddy stack once. This is the last restart needed. After it, the Editor handles reloads.
 
 ## 4. Verify

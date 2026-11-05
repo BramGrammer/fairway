@@ -2,7 +2,8 @@
 # Start with: npm run dev:up   (editor at http://127.0.0.1:3000, dev Caddy at :8080)
 services:
   caddy:
-    image: caddy:2
+    build: ./caddy
+    image: caddy-editor-dev-caddy:custom
     container_name: caddy-editor-dev-caddy
     command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     ports:

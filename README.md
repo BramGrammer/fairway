@@ -19,6 +19,10 @@ npm install
 npm run dev:up      # throwaway Caddy + editor in Docker
 ```
 
+The dev Caddy is built from `dev/caddy/Dockerfile`, the same plugin build as production (Cloudflare DNS, Coraza, GeoIP, rate limit, cache, S3 storage, brotli). That is what lets the dev editor validate a real Caddyfile; stock `caddy:2` rejects directives like `geo_ip`. The first `dev:up` compiles it and takes a few minutes; later runs reuse the cached image.
+
+Validate, Format and Routes only read your Caddyfile (`/adapt` never applies it), so they are safe with a real one. Do not **Deploy** a production Caddyfile in dev: it would try to load real domains, certificates and storage.
+
 Editor: http://127.0.0.1:3000. The dev Caddy serves http://127.0.0.1:8080 and :8081. Change the response text in the editor, deploy, and watch `:8080` change with no restart. `npm run dev:down` stops it, `npm run dev:reset` also wipes its state.
 
 Frontend work with hot reload: keep the dev stack running and start `npm run dev:web` (Vite on http://localhost:5173, proxying `/api` to the editor on :3000).

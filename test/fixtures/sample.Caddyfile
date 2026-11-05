@@ -1,0 +1,77 @@
+{
+	order geo_ip first
+	order coraza_waf before rate_limit
+}
+
+(compression) {
+	encode zstd gzip
+}
+(secure) {
+	import compression
+	header X-Frame-Options DENY
+}
+(waf) {
+	coraza_waf {
+		directives "SecRuleEngine On"
+	}
+}
+(geo_nl_be) {
+	geo_ip {
+		db_path /geoip/GeoLite2-City.mmdb
+	}
+	@blocked not vars {geoip.country_code} NL BE
+	respond @blocked "Access Denied" 403
+}
+(geo_cdn) {
+	@blocked_cdn {
+		not header_regexp CF-IPCountry ^(NL|BE|DE|FR|GB|IE|LU|AT|CH|US|CA|AU|JP|NZ)$
+	}
+	respond @blocked_cdn "Access Denied" 403
+}
+
+app.example.com, www.example.com {
+	import secure
+	import geo_nl_be
+	redir /old /new permanent
+	handle /api/* {
+		reverse_proxy 10.0.0.5:4000
+	}
+	handle {
+		reverse_proxy 10.0.0.5:5173
+	}
+}
+
+media.example.com {
+	import compression
+	reverse_proxy https://10.0.0.7:8443 {
+		transport http {
+			tls_insecure_skip_verify
+		}
+	}
+}
+
+cdn.example.com {
+	import geo_cdn
+	reverse_proxy 10.0.0.5:4000 10.0.0.6:4000
+}
+
+files.example.com {
+	root * /srv
+	file_server browse
+}
+
+spa.example.com {
+	import compression
+	import waf
+	import geo_nl_be
+	root * /srv/spa
+	file_server
+}
+
+status.example.com {
+	respond "ok" 200
+}
+
+:9999 {
+	respond "catch all"
+}

@@ -45,6 +45,36 @@ export type FormatResult =
   | { ok: true; text: string; changed: boolean }
   | { ok: false; error: string }
 
+export interface Chip {
+  label: string
+  detail?: string
+}
+
+export interface Destination {
+  kind: "proxy" | "file" | "redirect" | "respond" | "other"
+  summary: string
+  upstreams?: string[]
+  status?: number
+  target?: string
+}
+
+export interface Rule {
+  match: string
+  destinations: Destination[]
+  middleware: Chip[]
+}
+
+export interface Site {
+  hosts: string[]
+  listen: string[]
+  middleware: Chip[]
+  rules: Rule[]
+}
+
+export type RoutesReply =
+  | { ok: true; source: "running" | "editor"; sites: Site[] }
+  | { ok: false; error: string }
+
 export type DeployResult =
   | {
       ok: true
@@ -78,3 +108,24 @@ export function describeFailure(result: Extract<DeployResult, { ok: false }>) {
       return "Not deployed."
   }
 }
+
+export interface HostStats {
+  requests: number
+  codes: { "2xx": number; "3xx": number; "4xx": number; "5xx": number; other: number }
+  bytes: number
+  avgMs: number
+  inFlight: number
+  rate: number
+  history: number[]
+}
+
+export type MetricsReply =
+  | {
+      ok: true
+      enabled: boolean
+      perHost: boolean
+      windowMs: number
+      coveredMs: number
+      hosts: Record<string, HostStats>
+    }
+  | { ok: false; error: string }

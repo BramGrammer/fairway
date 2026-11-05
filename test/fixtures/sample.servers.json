@@ -1,0 +1,419 @@
+{
+ "srv0": {
+  "listen": [
+   ":443"
+  ],
+  "routes": [
+   {
+    "match": [
+     {
+      "host": [
+       "status.example.com"
+      ]
+     }
+    ],
+    "handle": [
+     {
+      "handler": "subroute",
+      "routes": [
+       {
+        "handle": [
+         {
+          "body": "ok",
+          "handler": "static_response",
+          "status_code": 200
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "terminal": true
+   },
+   {
+    "match": [
+     {
+      "host": [
+       "media.example.com"
+      ]
+     }
+    ],
+    "handle": [
+     {
+      "handler": "subroute",
+      "routes": [
+       {
+        "handle": [
+         {
+          "encodings": {
+           "gzip": {},
+           "zstd": {}
+          },
+          "handler": "encode",
+          "prefer": [
+           "zstd",
+           "gzip"
+          ]
+         },
+         {
+          "handler": "reverse_proxy",
+          "transport": {
+           "protocol": "http",
+           "tls": {
+            "insecure_skip_verify": true
+           }
+          },
+          "upstreams": [
+           {
+            "dial": "10.0.0.7:8443"
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "terminal": true
+   },
+   {
+    "match": [
+     {
+      "host": [
+       "files.example.com"
+      ]
+     }
+    ],
+    "handle": [
+     {
+      "handler": "subroute",
+      "routes": [
+       {
+        "handle": [
+         {
+          "handler": "vars",
+          "root": "/srv"
+         },
+         {
+          "browse": {},
+          "handler": "file_server",
+          "hide": [
+           "./Caddyfile"
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "terminal": true
+   },
+   {
+    "match": [
+     {
+      "host": [
+       "app.example.com",
+       "www.example.com"
+      ]
+     }
+    ],
+    "handle": [
+     {
+      "handler": "subroute",
+      "routes": [
+       {
+        "handle": [
+         {
+          "account_id": 0,
+          "api_key": "",
+          "db_path": "/geoip/GeoLite2-City.mmdb",
+          "download_frequency": 0,
+          "handler": "geoip",
+          "override_country_code": "",
+          "reload_frequency": 0,
+          "trust_header": ""
+         },
+         {
+          "handler": "headers",
+          "response": {
+           "set": {
+            "X-Frame-Options": [
+             "DENY"
+            ]
+           }
+          }
+         }
+        ]
+       },
+       {
+        "handle": [
+         {
+          "handler": "static_response",
+          "headers": {
+           "Location": [
+            "/new"
+           ]
+          },
+          "status_code": 301
+         }
+        ],
+        "match": [
+         {
+          "path": [
+           "/old"
+          ]
+         }
+        ]
+       },
+       {
+        "handle": [
+         {
+          "encodings": {
+           "gzip": {},
+           "zstd": {}
+          },
+          "handler": "encode",
+          "prefer": [
+           "zstd",
+           "gzip"
+          ]
+         }
+        ]
+       },
+       {
+        "group": "group5",
+        "handle": [
+         {
+          "handler": "subroute",
+          "routes": [
+           {
+            "handle": [
+             {
+              "handler": "reverse_proxy",
+              "upstreams": [
+               {
+                "dial": "10.0.0.5:4000"
+               }
+              ]
+             }
+            ]
+           }
+          ]
+         }
+        ],
+        "match": [
+         {
+          "path": [
+           "/api/*"
+          ]
+         }
+        ]
+       },
+       {
+        "group": "group5",
+        "handle": [
+         {
+          "handler": "subroute",
+          "routes": [
+           {
+            "handle": [
+             {
+              "handler": "reverse_proxy",
+              "upstreams": [
+               {
+                "dial": "10.0.0.5:5173"
+               }
+              ]
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "handle": [
+         {
+          "body": "Access Denied",
+          "handler": "static_response",
+          "status_code": 403
+         }
+        ],
+        "match": [
+         {
+          "not": [
+           {
+            "vars": {
+             "{geoip.country_code}": [
+              "NL",
+              "BE"
+             ]
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "terminal": true
+   },
+   {
+    "match": [
+     {
+      "host": [
+       "cdn.example.com"
+      ]
+     }
+    ],
+    "handle": [
+     {
+      "handler": "subroute",
+      "routes": [
+       {
+        "handle": [
+         {
+          "body": "Access Denied",
+          "handler": "static_response",
+          "status_code": 403
+         }
+        ],
+        "match": [
+         {
+          "not": [
+           {
+            "header_regexp": {
+             "CF-IPCountry": {
+              "pattern": "^(NL|BE|DE|FR|GB|IE|LU|AT|CH|US|CA|AU|JP|NZ)$"
+             }
+            }
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "handle": [
+         {
+          "handler": "reverse_proxy",
+          "upstreams": [
+           {
+            "dial": "10.0.0.5:4000"
+           },
+           {
+            "dial": "10.0.0.6:4000"
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "terminal": true
+   },
+   {
+    "match": [
+     {
+      "host": [
+       "spa.example.com"
+      ]
+     }
+    ],
+    "handle": [
+     {
+      "handler": "subroute",
+      "routes": [
+       {
+        "handle": [
+         {
+          "account_id": 0,
+          "api_key": "",
+          "db_path": "/geoip/GeoLite2-City.mmdb",
+          "download_frequency": 0,
+          "handler": "geoip",
+          "override_country_code": "",
+          "reload_frequency": 0,
+          "trust_header": ""
+         },
+         {
+          "handler": "vars",
+          "root": "/srv/spa"
+         },
+         {
+          "directives": "SecRuleEngine On",
+          "handler": "waf",
+          "include": [],
+          "load_owasp_crs": false,
+          "tx_id_req_header": ""
+         },
+         {
+          "encodings": {
+           "gzip": {},
+           "zstd": {}
+          },
+          "handler": "encode",
+          "prefer": [
+           "zstd",
+           "gzip"
+          ]
+         }
+        ]
+       },
+       {
+        "handle": [
+         {
+          "body": "Access Denied",
+          "handler": "static_response",
+          "status_code": 403
+         }
+        ],
+        "match": [
+         {
+          "not": [
+           {
+            "vars": {
+             "{geoip.country_code}": [
+              "NL",
+              "BE"
+             ]
+            }
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "handle": [
+         {
+          "handler": "file_server",
+          "hide": [
+           "./Caddyfile"
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ],
+    "terminal": true
+   }
+  ]
+ },
+ "srv1": {
+  "listen": [
+   ":9999"
+  ],
+  "routes": [
+   {
+    "handle": [
+     {
+      "body": "catch all",
+      "handler": "static_response"
+     }
+    ]
+   }
+  ]
+ }
+}
