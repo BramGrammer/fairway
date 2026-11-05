@@ -44,9 +44,15 @@ The editor is CodeMirror 6 with a Caddyfile mode: tab indentation (Tab and Shift
 
 ## Deploy on the NAS
 
+GitHub Actions builds the image on every push to `main` and publishes it to `ghcr.io/bramgrammer/fairway` (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The NAS only pulls it, so no source code is needed there.
+
 First apply the changes to the Caddy stack in [docs/caddy-stack-changes.md](docs/caddy-stack-changes.md) (admin socket folder).
 
-Then in Dockge create a stack from this folder, copy `.env.example` to `.env`, and set `CADDY_STACK_DIR`.
+Then in Dockge create a stack named `fairway` and put these in its folder:
+
+- `compose.yaml` from this repo
+- `.env`, copied from `.env.example`, with `CADDY_STACK_DIR` set
+- `tailscale/serve.json`, only for the `tailscale` profile
 
 | Profile (`COMPOSE_PROFILES`) | What you get |
 | --- | --- |
@@ -54,6 +60,12 @@ Then in Dockge create a stack from this folder, copy `.env.example` to `.env`, a
 | `tailscale` | Tailscale sidecar at `https://fairway.<tailnet>.ts.net`, no published port, only `TS_ALLOWED_LOGIN` is let in. Needs `TS_AUTHKEY` (tagged `tag:fairway`) and an ACL restricting that tag to your own devices. |
 
 Switching is a one-line change to `COMPOSE_PROFILES`, then Deploy.
+
+**Updating:** pull the new image and redeploy. In Dockge press **Update** on the stack (or `docker compose pull`, then Deploy). Set `FAIRWAY_TAG` to a version or `sha-...` to pin one instead of `latest`.
+
+**Releasing a version:** push a tag such as `v1.0.0` to also publish `1.0.0` and `1.0`.
+
+The package must be public so the NAS can pull it without logging in. After the first build, open the package on GitHub, then Package settings, Change visibility, Public.
 
 ## Configuration
 

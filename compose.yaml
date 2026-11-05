@@ -1,7 +1,7 @@
 # One of two profiles runs: "local" (default, see .env.example) or "tailscale".
 
 x-editor: &editor
-  build: .
+  image: ghcr.io/bramgrammer/fairway:${FAIRWAY_TAG:-latest}
   restart: unless-stopped
   # Caddy's admin socket is created by root inside the Caddy container.
   user: root
