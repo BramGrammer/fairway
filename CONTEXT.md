@@ -19,6 +19,21 @@ Checking that a Caddyfile is acceptable to Caddy without applying it. Always hap
 **Reload**:
 Making Caddy run a new Caddyfile in place, with no dropped connections.
 
+**Site**:
+One hostname block of the Caddyfile: the hosts it answers for, and everything that happens to a request for them.
+
+**Rule**:
+Part of a Site that applies to some requests, such as one path, and sends them to its Destinations. Every Site has at least one.
+
+**Destination**:
+Where a Rule finally sends a request: an upstream server, a directory of files, a redirect or a fixed response.
+
+**Middleware**:
+Something that acts on a request on its way to a Destination, such as compression, a firewall or a country restriction. Applies to a whole Site or to a single Rule.
+
+**Certificate**:
+The TLS identity Caddy presents to visitors of a Site. Obtained and renewed by Caddy itself; Fairway only observes it.
+
 **Revision**:
 A saved, timestamped version of the Caddyfile that has been applied. Can be diffed against and rolled back to.
 
@@ -31,4 +46,5 @@ Reloading an earlier Revision as the live Caddyfile.
 ## Relationships
 
 - A Caddyfile is validated, then reloaded; a successful reload creates a Revision.
+- A Site has one or more Rules; each Rule has Middleware and leads to one or more Destinations.
 - Fairway never holds an invalid Caddyfile as the live one.
