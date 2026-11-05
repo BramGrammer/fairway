@@ -44,7 +44,7 @@ The editor is CodeMirror 6 with a Caddyfile mode: tab indentation (Tab and Shift
 
 ## Deploy on the NAS
 
-GitHub Actions builds the image on every push to `main` and publishes it to `ghcr.io/bramgrammer/fairway` (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The NAS only pulls it, so no source code is needed there.
+Releases publish the image to `ghcr.io/bramgrammer/fairway` (see [Releases](#releases)). The NAS only pulls it, so no source code is needed there.
 
 First apply the changes to the Caddy stack in [docs/caddy-stack-changes.md](docs/caddy-stack-changes.md) (admin socket folder).
 
@@ -61,11 +61,19 @@ Then in Dockge create a stack named `fairway` and put these in its folder:
 
 Switching is a one-line change to `COMPOSE_PROFILES`, then Deploy.
 
-**Updating:** pull the new image and redeploy. In Dockge press **Update** on the stack (or `docker compose pull`, then Deploy). Set `FAIRWAY_TAG` to a version or `sha-...` to pin one instead of `latest`.
-
-**Releasing a version:** push a tag such as `v1.0.0` to also publish `1.0.0` and `1.0`.
+**Updating:** pull the new image and redeploy. In Dockge press **Update** on the stack (or `docker compose pull`, then Deploy). Set `FAIRWAY_TAG` to a version such as `0.2.0` to pin one instead of `latest`.
 
 The package must be public so the NAS can pull it without logging in. After the first build, open the package on GitHub, then Package settings, Change visibility, Public.
+
+## Releases
+
+Versions, the changelog and the image are produced by [release-please](https://github.com/googleapis/release-please) from [Conventional Commits](https://www.conventionalcommits.org). Nothing is published when you merge to `main`; it only updates a release pull request.
+
+1. Write commit messages as `feat: ...` (minor bump), `fix: ...` (patch), or `feat!: ...` / a `BREAKING CHANGE:` footer (major; while the version is below 1.0 a breaking change bumps the minor). `docs:`, `chore:`, `ci:`, `style:` and `test:` do not trigger a release.
+2. Merging to `main` opens or updates a pull request named `chore(main): release X.Y.Z`. It bumps the version in `package.json`, `package-lock.json` and `web/package.json`, and adds the new section to [CHANGELOG.md](CHANGELOG.md).
+3. Merge that pull request when you want to release. This tags `vX.Y.Z`, creates the GitHub Release with the changelog as its notes, and publishes the image as `X.Y.Z`, `X.Y` and `latest`.
+
+CI (typecheck, lint, tests) runs on every push and pull request. The release pull request itself is made with the built-in token, so GitHub does not run CI on it; it only changes version files and the changelog. The repository setting "Allow GitHub Actions to create and approve pull requests" must be on.
 
 ## Configuration
 
