@@ -44,6 +44,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { FairwayLogo } from "@/components/fairway-logo"
 import { TopBarSlotProvider } from "@/components/top-bar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { onShowInEditor } from "@/lib/show-in-editor"
 import { EditorTab } from "@/features/editor-tab"
 import { HistoryTab } from "@/features/history-tab"
 import { LogsTab } from "@/features/logs-tab"
@@ -141,6 +142,8 @@ export default function App() {
   const [topBarSlot, setTopBarSlot] = useState<HTMLElement | null>(null)
   const caddyfile = useCaddyfile()
   const { status, denied } = useStatus()
+
+  useEffect(() => onShowInEditor(() => setView("editor")), [])
 
   useEffect(() => {
     window.history.replaceState(null, "", `#${view}`)

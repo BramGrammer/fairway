@@ -17,9 +17,11 @@ interface CodeEditorProps {
   onSave?: () => void
   /** Called for Alt+Shift+F. */
   onFormat?: () => void
+  /** Select this range, scroll it into view and focus the editor. A new `seq` repeats the request. */
+  reveal?: { from: number; to: number; seq: number } | null
 }
 
-export function CodeEditor({ value, onChange, onCursor, onSave, onFormat }: CodeEditorProps) {
+export function CodeEditor({ value, onChange, onCursor, onSave, onFormat, reveal }: CodeEditorProps) {
   const host = useRef<HTMLDivElement>(null)
   const view = useRef<EditorView | null>(null)
   const theme = useRef(new Compartment())
@@ -90,6 +92,23 @@ export function CodeEditor({ value, onChange, onCursor, onSave, onFormat }: Code
       })
     }
   }, [value])
+
+  useEffect(() => {
+    if (!reveal) return
+    // The editor may only just have become visible; wait a frame so it has a size to scroll in.
+    const frame = requestAnimationFrame(() => {
+      const editor = view.current
+      if (!editor) return
+      const length = editor.state.doc.length
+      const from = Math.min(reveal.from, length)
+      editor.dispatch({
+        selection: { anchor: from, head: Math.min(reveal.to, length) },
+        effects: EditorView.scrollIntoView(from, { y: "start", yMargin: 24 }),
+      })
+      editor.focus()
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [reveal])
 
   useEffect(() => {
     view.current?.dispatch({ effects: theme.current.reconfigure(editorTheme(dark)) })

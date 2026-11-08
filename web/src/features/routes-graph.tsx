@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowRightIcon,
   ChevronDownIcon,
@@ -22,8 +22,21 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Toggle } from "@/components/ui/toggle"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { RouteDrawer } from "@/features/route-drawer"
+import { TlsTab } from "@/features/tls-tab"
+import { TrafficTab } from "@/features/traffic-tab"
+import { RouteOverview } from "@/features/route-overview-view"
 import { useMetrics } from "@/hooks/use-metrics"
+import { useUpstreamHealth } from "@/hooks/use-upstream-health"
+import { HealthDot } from "@/features/health-dot"
+import { TlsBadge } from "@/features/tls-badge"
+import { useTlsStatus } from "@/hooks/use-tls-status"
+import { groupBadge, hostBadge } from "@/lib/tls-badges"
+import { upstreamHealth, worstHealth } from "@/lib/upstream-health"
 import type { Chip, Destination, HostStats, Site } from "@/lib/api"
+import { nodeKind } from "@/lib/route-drawer"
+import { estimateTraffic, mergeStats, trafficContributions } from "@/lib/traffic"
+import { chipTexts, destTexts, hostTexts, matchesQuery } from "@/features/routes-filter"
 import { PRESSED } from "@/lib/toggle-styles"
 import { cn } from "@/lib/utils"
 
@@ -88,6 +101,7 @@ interface Arranged {
   groupOf: Map<string, Group>
 }
 
+const isHostNode = (id: string) => id.startsWith("host:") || id.startsWith("host-group:")
 const hostLabel = (host: string) => (host === "*" ? "any host" : host)
 const isDomain = (host: string) => /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host)
 const isInternal = (site: Site) => site.hosts.some((host) => host.includes(".int."))
@@ -273,30 +287,6 @@ const fmtCount = (n: number) =>
   n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(Math.round(n))
 const fmtRate = (rate: number) => (rate >= 10 ? `${Math.round(rate)}/s` : rate >= 0.1 ? `${rate.toFixed(1)}/s` : rate > 0 ? "<0.1/s" : "idle")
 
-function mergeStats(list: HostStats[]): HostStats | null {
-  if (list.length === 0) return null
-  const length = Math.max(...list.map((s) => s.history.length))
-  const history = Array.from({ length }, (_, i) =>
-    list.reduce((sum, s) => sum + (s.history[s.history.length - length + i] ?? 0), 0),
-  )
-  const requests = list.reduce((sum, s) => sum + s.requests, 0)
-  return {
-    requests,
-    codes: {
-      "2xx": list.reduce((sum, s) => sum + s.codes["2xx"], 0),
-      "3xx": list.reduce((sum, s) => sum + s.codes["3xx"], 0),
-      "4xx": list.reduce((sum, s) => sum + s.codes["4xx"], 0),
-      "5xx": list.reduce((sum, s) => sum + s.codes["5xx"], 0),
-      other: list.reduce((sum, s) => sum + s.codes.other, 0),
-    },
-    bytes: list.reduce((sum, s) => sum + s.bytes, 0),
-    inFlight: list.reduce((sum, s) => sum + s.inFlight, 0),
-    rate: list.reduce((sum, s) => sum + s.rate, 0),
-    avgMs: requests > 0 ? list.reduce((sum, s) => sum + s.avgMs * s.requests, 0) / requests : 0,
-    history,
-  }
-}
-
 function Sparkline({ values }: { values: number[] }) {
   if (values.length < 2 || !values.some((v) => v > 0)) return null
   const width = 52
@@ -341,11 +331,11 @@ const errorShare = (stats: HostStats | null) => (stats && stats.requests > 0 ? s
 
 const edgeWidth = (count: number) => clamp(1.25 + Math.sqrt(count) * 1.1, 1.25, 9)
 
-export function RoutesGraph({ sites }: { sites: Site[] }) {
+export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: string }) {
   const raw = useMemo(() => buildRaw(sites), [sites])
   const base = useMemo(() => arrange(raw, raw.paths), [raw])
 
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
+  const [manualExpanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [pinned, setPinned] = useState<string | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
   const [isolate, setIsolate] = useState(false)
@@ -355,6 +345,13 @@ export function RoutesGraph({ sites }: { sites: Site[] }) {
   const metrics = useMetrics(true, windowSeconds)
   const live = metrics?.ok && metrics.enabled && metrics.perHost ? metrics : null
   const byTraffic = weighting === "traffic" && live !== null
+  const upstreams = useUpstreamHealth(true)
+  const tlsStatus = useTlsStatus(true)
+  const siteHosts = (id: string) => raw.hosts.get(id)?.site.hosts ?? []
+  const destHealth = (id: string) => {
+    const dest = raw.dests.get(id)?.dest
+    return dest?.kind === "proxy" ? upstreamHealth(dest.upstreams?.[0] ?? "", upstreams) : null
+  }
 
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(1100)
@@ -375,11 +372,31 @@ export function RoutesGraph({ sites }: { sites: Site[] }) {
     base.groupOf.get(path.dest)?.id === id
 
   const shownPaths = useMemo(
-    () => (isolate && pinned ? raw.paths.filter((p) => touches(p, pinned)) : raw.paths),
+    () => {
+      const found = query
+        ? raw.paths.filter((p) =>
+            matchesQuery(query, [
+              ...hostTexts(raw.hosts.get(p.host)!.site),
+              ...chipTexts(raw.handlers.get(p.handler)!.chips),
+              ...destTexts(raw.dests.get(p.dest)!.dest),
+            ]),
+          )
+        : raw.paths
+      return isolate && pinned ? found.filter((p) => touches(p, pinned)) : found
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [raw, base, isolate, pinned],
+    [raw, base, isolate, pinned, query],
   )
   const view = useMemo(() => arrange(raw, shownPaths), [raw, shownPaths])
+
+  // While searching, every group that still holds a match is open; clearing the search restores the manual state.
+  const expanded = useMemo(
+    () =>
+      query
+        ? new Set([...view.hostGroups, ...view.destGroups].map((group) => group.id))
+        : manualExpanded,
+    [query, view, manualExpanded],
+  )
 
   const hostStats = useMemo(() => {
     const map = new Map<string, HostStats | null>()
@@ -495,14 +512,15 @@ export function RoutesGraph({ sites }: { sites: Site[] }) {
     tabIndex: 0,
     onMouseEnter: () => setHovered(id),
     onMouseLeave: () => setHovered(null),
+    "data-node-id": id,
     onClick: (event: React.MouseEvent) => {
       event.stopPropagation()
-      setPinned((current) => (current === id ? null : id))
+      setPinned(id)
     },
     onKeyDown: (event: React.KeyboardEvent) => {
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault()
-        setPinned((current) => (current === id ? null : id))
+        setPinned(id)
       }
     },
   })
@@ -514,6 +532,39 @@ export function RoutesGraph({ sites }: { sites: Site[] }) {
     if (id.startsWith("handler:")) return raw.handlers.get(id)?.chips.map((c) => c.label).join(" + ") || "No middleware"
     return id.replace(/^[a-z]+:/, "")
   }
+
+  // Opening a member of a collapsed group expands the group so the node is visible too.
+  const openMember = (id: string) => {
+    const group = base.groupOf.get(id)
+    if (group) setExpanded((current) => new Set(current).add(group.id))
+    setPinned(id)
+  }
+
+  const closeDrawer = useCallback(() => {
+    setPinned(null)
+    setIsolate(false)
+  }, [])
+
+  // The drawer shrinks the graph area, so bring the selected node back into view.
+  useEffect(() => {
+    if (!pinned) return
+    const frame = requestAnimationFrame(() => {
+      const nodes = containerRef.current?.querySelectorAll<HTMLElement>("[data-node-id]") ?? []
+      for (const node of nodes) {
+        if (node.dataset.nodeId === pinned) node.scrollIntoView({ block: "nearest", inline: "nearest" })
+      }
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [pinned])
+
+  const drawerParts = pinned
+    ? trafficContributions(raw.paths, (p) => touches(p, pinned), isHostNode(pinned)).map(({ host, fraction }) => ({
+        stats: hostStats.get(host) ?? null,
+        fraction,
+      }))
+    : []
+  /** Requests per second through the open node; null while there are no live numbers. */
+  const drawerRate = live ? (estimateTraffic(drawerParts)?.stats.rate ?? 0) : null
 
   const cols = layout.colX
   const base_ring = "absolute rounded-md border transition-opacity outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -610,7 +661,8 @@ export function RoutesGraph({ sites }: { sites: Site[] }) {
         </Alert>
       )}
 
-      <ScrollArea className="min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1">
+      <ScrollArea className="min-h-0 min-w-0 flex-1">
         <div ref={containerRef} className="w-full" onClick={() => setPinned(null)}>
           <div className="relative p-4" style={{ minWidth: MIN_INNER + PAD * 2 }}>
             <div className="relative" style={{ height: layout.total + 32 }}>
@@ -704,6 +756,7 @@ export function RoutesGraph({ sites }: { sites: Site[] }) {
                           </Button>
                           <span className="truncate text-sm font-medium">{item.group.label}</span>
                           {item.group.internal && <LockIcon className="size-3 shrink-0 text-muted-foreground" />}
+                          <TlsBadge badge={groupBadge(item.group.members.map(siteHosts), tlsStatus)} />
                         </div>
                         <span className="pl-7 text-xs text-muted-foreground">
                           {item.group.members.length} sites
@@ -747,6 +800,7 @@ export function RoutesGraph({ sites }: { sites: Site[] }) {
                       <div className="flex items-center gap-1.5">
                         <span className="truncate text-sm font-medium">{hostLabel(primary)}</span>
                         {isInternal(node.site) && <LockIcon className="size-3 shrink-0 text-muted-foreground" />}
+                        <TlsBadge badge={hostBadge(node.site.hosts, tlsStatus)} />
                         {errorShare(stats) > 0.01 && (
                           <span className="size-1.5 shrink-0 rounded-full bg-destructive" title="Some responses were 5xx" />
                         )}
@@ -838,6 +892,11 @@ export function RoutesGraph({ sites }: { sites: Site[] }) {
                             <ChevronRightIcon />
                           </Button>
                           <span className="truncate font-mono text-sm font-medium">{item.group.label}</span>
+                          <HealthDot
+                            className="ml-auto"
+                            health={worstHealth(item.group.members.map(destHealth))}
+                            title="Worst state of the upstreams in this group"
+                          />
                         </div>
                         <span className="pl-7 text-xs text-muted-foreground">
                           {item.group.members.length} destinations
@@ -867,6 +926,7 @@ export function RoutesGraph({ sites }: { sites: Site[] }) {
                       <span className={cn("truncate text-sm", node.dest.kind === "proxy" && "font-mono text-xs")}>
                         {label}
                       </span>
+                      <HealthDot health={destHealth(item.id)?.health ?? null} />
                       {byTraffic && (
                         <span className="ml-auto shrink-0 text-xs text-muted-foreground">
                           {fmtCount(flow.dests.get(item.id) ?? 0)} req
@@ -880,6 +940,33 @@ export function RoutesGraph({ sites }: { sites: Site[] }) {
           </div>
         </div>
       </ScrollArea>
+
+      {pinned && (
+        <RouteDrawer
+          name={labelOf(pinned)}
+          kind={nodeKind(pinned)}
+          onClose={closeDrawer}
+          overview={
+            <RouteOverview
+              data={{ raw, groups: [...base.hostGroups, ...base.destGroups], destWeights: byTraffic ? flow.dests : null }}
+              id={pinned}
+              onOpen={openMember}
+              health={upstreams}
+              rate={drawerRate}
+              traffic={
+                <TrafficTab
+                  metrics={metrics}
+                  parts={drawerParts}
+                  estimated={!isHostNode(pinned)}
+                  windowPhrase={win.phrase}
+                />
+              }
+              tls={<TlsTab name={labelOf(pinned)} kind={nodeKind(pinned)} />}
+            />
+          }
+        />
+      )}
+      </div>
     </div>
   )
 }

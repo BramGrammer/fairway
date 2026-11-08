@@ -10,6 +10,7 @@ import {
   RefreshCwIcon,
   RouteIcon,
   SearchIcon,
+  XIcon,
 } from "lucide-react"
 
 import { TopBar } from "@/components/top-bar"
@@ -26,6 +27,7 @@ import {
 import {
   InputGroup,
   InputGroupAddon,
+  InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -51,6 +53,7 @@ import {
 import { cn } from "@/lib/utils"
 import { PRESSED } from "@/lib/toggle-styles"
 import { RoutesGraph } from "@/features/routes-graph"
+import { normalizeQuery, siteMatches } from "@/features/routes-filter"
 
 type Source = "running" | "editor"
 type Grouping = "graph" | "site" | "upstream"
@@ -255,21 +258,6 @@ function UpstreamTable({ sites }: { sites: Site[] }) {
   )
 }
 
-function matches(site: Site, query: string): boolean {
-  if (!query) return true
-  const haystack = [
-    ...site.hosts,
-    ...site.listen,
-    ...site.middleware.flatMap((chip) => [chip.label, chip.detail ?? ""]),
-    ...site.rules.flatMap((rule) => [
-      rule.match,
-      ...rule.middleware.map((chip) => chip.label),
-      ...rule.destinations.flatMap((dest) => [dest.summary, ...(dest.upstreams ?? [])]),
-    ]),
-  ]
-  return haystack.some((text) => text.toLowerCase().includes(query))
-}
-
 export function RoutesTab({ editorText }: RoutesTabProps) {
   const [source, setSource] = useState<Source>("running")
   const [grouping, setGrouping] = useState<Grouping>("graph")
@@ -294,9 +282,9 @@ export function RoutesTab({ editorText }: RoutesTabProps) {
     }
   }, [key, source, editorText])
 
-  const query = search.trim().toLowerCase()
+  const query = normalizeQuery(search)
   const sites = useMemo(
-    () => (result?.sites ?? []).filter((site) => matches(site, query)),
+    () => (result?.sites ?? []).filter((site) => siteMatches(site, query)),
     [result, query]
   )
   const routeCount = sites.reduce((total, site) => total + site.rules.length, 0)
@@ -308,16 +296,24 @@ export function RoutesTab({ editorText }: RoutesTabProps) {
   return (
     <div className="flex h-full flex-col">
       <TopBar>
-        <InputGroup className="w-48">
+        <InputGroup className="w-64">
           <InputGroupAddon>
             <SearchIcon />
           </InputGroupAddon>
           <InputGroupInput
             type="search"
-            placeholder="Search sites"
+            placeholder="Search hosts, upstreams, middleware"
+            aria-label="Search routes"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
+          {search && (
+            <InputGroupAddon align="inline-end">
+              <InputGroupButton size="icon-xs" aria-label="Clear search" onClick={() => setSearch("")}>
+                <XIcon />
+              </InputGroupButton>
+            </InputGroupAddon>
+          )}
         </InputGroup>
 
         <Separator orientation="vertical" className="mx-1 data-vertical:h-6 data-vertical:self-auto" />
@@ -397,14 +393,14 @@ export function RoutesTab({ editorText }: RoutesTabProps) {
               </EmptyMedia>
               <EmptyTitle>{query ? "No matching sites" : "No sites"}</EmptyTitle>
               <EmptyDescription>
-                {query ? "Nothing matches that search." : "Caddy has no HTTP sites configured."}
+                {query ? "No host, upstream or middleware matches that search." : "Caddy has no HTTP sites configured."}
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
         ) : (
           <div className={cn("h-full", loading && "opacity-60")}>
             {grouping === "graph" ? (
-              <RoutesGraph sites={sites} />
+              <RoutesGraph sites={sites} query={query} />
             ) : (
               <ScrollArea className="h-full">
                 {grouping === "site" ? <SiteTable sites={sites} /> : <UpstreamTable sites={sites} />}

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import {
   CircleAlertIcon,
@@ -26,6 +26,8 @@ import {
   type FormatResult,
   type ValidateResult,
 } from "@/lib/api"
+import { onShowInEditor } from "@/lib/show-in-editor"
+import { findSiteBlocks } from "@/lib/site-blocks"
 
 interface EditorTabProps {
   /** The tab stays mounted while hidden; only the visible one fills the top bar. */
@@ -68,7 +70,26 @@ export function EditorTab({
   const [deploying, setDeploying] = useState(false)
   const [formatting, setFormatting] = useState(false)
 
+  const [reveal, setReveal] = useState<{ from: number; to: number; seq: number } | null>(null)
+
   const dirty = text !== baseText
+
+  useEffect(
+    () =>
+      onShowInEditor((host) => {
+        const blocks = findSiteBlocks(text, host)
+        const first = blocks[0]
+        if (!first) {
+          toast.error(`No block for ${host} in the Caddyfile`)
+          return
+        }
+        setReveal((prev) => ({ ...first, seq: (prev?.seq ?? 0) + 1 }))
+        if (blocks.length > 1) {
+          toast.info(`${blocks.length} blocks match ${host}`, { description: "Selected the first one." })
+        }
+      }),
+    [text]
+  )
 
   async function validate(): Promise<boolean> {
     setValidating(true)
@@ -208,6 +229,7 @@ export function EditorTab({
           onCursor={(line, column) => setCursor({ line, column })}
           onSave={() => void review()}
           onFormat={() => void format()}
+          reveal={reveal}
         />
       </div>
 

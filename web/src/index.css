@@ -24,6 +24,7 @@
     --color-input: var(--input);
     --color-border: var(--border);
     --color-destructive: var(--destructive);
+    --color-success: var(--success);
     --color-accent-foreground: var(--accent-foreground);
     --color-accent: var(--accent);
     --color-muted-foreground: var(--muted-foreground);
@@ -89,6 +90,7 @@
     --accent: oklch(0.9869 0.0214 95.2774);
     --accent-foreground: oklch(0.4732 0.1247 46.2007);
     --destructive: oklch(0.6368 0.2078 25.3313);
+    --success: oklch(0.5961 0.1574 149.2);
     --border: oklch(0.9276 0.0058 264.5313);
     --input: oklch(0.9276 0.0058 264.5313);
     --ring: oklch(0.7686 0.1647 70.0804);
@@ -145,6 +147,7 @@
     --accent: oklch(0.4732 0.1247 46.2007);
     --accent-foreground: oklch(0.9243 0.1151 95.7459);
     --destructive: oklch(0.6368 0.2078 25.3313);
+    --success: oklch(0.7227 0.1920 149.5793);
     --border: oklch(0.3715 0 0);
     --input: oklch(0.3715 0 0);
     --ring: oklch(0.7686 0.1647 70.0804);
@@ -210,4 +213,25 @@
 }
 @theme inline {
   --color-page: var(--page);
+}
+
+/* A soft highlight sweeping along a flow line; its duration is set inline from the traffic rate. */
+@keyframes flow-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+.flow-sweep {
+  animation: flow-sweep 3s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flow-sweep {
+    animation: none;
+    opacity: 0;
+  }
 }
