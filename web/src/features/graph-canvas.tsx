@@ -131,7 +131,8 @@ export function GraphCanvas({ width, height, fitKey, onBackgroundClick, ref, chi
       ref={viewport}
       className="absolute inset-0 cursor-grab touch-none overflow-hidden select-none active:cursor-grabbing"
       style={{
-        backgroundImage: "radial-gradient(circle, var(--border) 1px, transparent 1px)",
+        backgroundColor: "var(--canvas)",
+        backgroundImage: "radial-gradient(circle, color-mix(in oklab, var(--foreground) 14%, transparent) 1px, transparent 1px)",
         backgroundSize: `${grid}px ${grid}px`,
         backgroundPosition: `${view.x}px ${view.y}px`,
       }}

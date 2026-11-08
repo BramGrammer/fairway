@@ -1,15 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   ArrowRightIcon,
   ChevronDownIcon,
-  ChevronRightIcon,
+  ChevronUpIcon,
   ChevronsDownUpIcon,
   ChevronsUpDownIcon,
   CircleQuestionMarkIcon,
   CornerDownRightIcon,
   FolderIcon,
   InfoIcon,
-  LockIcon,
   MessageSquareIcon,
   PinIcon,
   XIcon,
@@ -23,6 +22,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { GraphCanvas, type CanvasHandle } from "@/features/graph-canvas"
 import { RouteDrawer } from "@/features/route-drawer"
+import { StepNode } from "@/features/step-node"
 import { TlsTab } from "@/features/tls-tab"
 import { TrafficTab } from "@/features/traffic-tab"
 import { RouteOverview } from "@/features/route-overview-view"
@@ -35,6 +35,8 @@ import { groupBadge, hostBadge } from "@/lib/tls-badges"
 import { upstreamHealth, worstHealth } from "@/lib/upstream-health"
 import type { Chip, Destination, HostStats, Site } from "@/lib/api"
 import { nodeKind } from "@/lib/route-drawer"
+import { PANEL_ROWS, PANEL_ROW_H, panelRows, splitMembers } from "@/lib/group-panel"
+import { stepHeight } from "@/lib/middleware-node"
 import { orderLayers, type Layers, type Link, type Unit } from "@/lib/graph-order"
 import { estimateTraffic, mergeStats, trafficContributions } from "@/lib/traffic"
 import { chipTexts, destTexts, hostTexts, matchesQuery } from "@/features/routes-filter"
@@ -50,16 +52,14 @@ const DEST_ICONS = {
 } as const
 
 const PAD = 16
-const SIDE_W = 210
-const STEP_W = 160
-const STEP_H = 44
+const SIDE_W = 240
+const STEP_W = 190
 const WP_H = 4
 const COL_GAP = 64
-const HOST_H = 44
-const GROUP_H = 64
-const HEADER_H = 28
+const HOST_H = 52
+const GROUP_H = 68
 const DEST_H = 32
-const MIN_GAP = 8
+const MIN_GAP = 16
 
 interface HostNode {
   id: string
@@ -340,15 +340,29 @@ function arrange(raw: Raw, paths: Path[]): Arranged {
 type Item =
   | { kind: "member"; id: string; height: number }
   | { kind: "group"; id: string; group: Group; height: number }
-  | { kind: "header"; id: string; group: Group; height: number }
+  | { kind: "panel"; id: string; group: Group; height: number; rows: PanelRow[]; centers: number[] }
 
-/** A column's boxes top to bottom: a collapsed group is one box, an open one a header plus its members. */
-function columnItems(groups: Group[], expanded: Set<string>, memberHeight: number): Item[] {
+/** A row of an open group's panel: a member, or the row standing in for the folded ones. */
+interface PanelRow {
+  id: string
+  /** How many members this row stands in for, when it is the "more" row. */
+  more?: number
+  /** Set on the row that folds a fully shown group back up. */
+  fewer?: boolean
+  height: number
+}
+
+/** A column's boxes top to bottom: a collapsed group is one box, an open one a panel of compact rows. */
+function columnItems(groups: Group[], expanded: Set<string>, memberHeight: number, keep: string | null, showAll: Set<string>, rowHeight: number): Item[] {
   return groups.flatMap((group): Item[] => {
-    const members = group.members.map((id): Item => ({ kind: "member", id, height: memberHeight }))
-    if (group.members.length === 1) return members
+    if (group.members.length === 1) return [{ kind: "member", id: group.members[0], height: memberHeight }]
     if (!expanded.has(group.id)) return [{ kind: "group", id: group.id, group, height: GROUP_H }]
-    return [{ kind: "header", id: `${group.id}:header`, group, height: HEADER_H }, ...members]
+    const { shown, hidden } = splitMembers(group.members, keep, showAll.has(group.id))
+    const rows: PanelRow[] = shown.map((id) => ({ id, height: rowHeight }))
+    if (hidden.length > 0) rows.push({ id: `${group.id}:more`, more: hidden.length, height: PANEL_ROW_H })
+    else if (group.members.length > PANEL_ROWS) rows.push({ id: `${group.id}:fewer`, fewer: true, height: PANEL_ROW_H })
+    const { centers, height } = panelRows(rows.map((row) => row.height))
+    return [{ kind: "panel", id: group.id, group, height, rows, centers }]
   })
 }
 
@@ -397,17 +411,33 @@ const fmtCount = (n: number) =>
   n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(Math.round(n))
 const fmtRate = (rate: number) => (rate >= 10 ? `${Math.round(rate)}/s` : rate >= 0.1 ? `${rate.toFixed(1)}/s` : rate > 0 ? "<0.1/s" : "idle")
 
-function Sparkline({ values }: { values: number[] }) {
+/** One point per sample, joined by straight segments, so nothing is smoothed away; it stretches to the width it is given. */
+function Sparkline({ values, className }: { values: number[]; className?: string }) {
   if (values.length < 2 || !values.some((v) => v > 0)) return null
-  const width = 52
-  const height = 18
+  const height = 16
   const max = Math.max(...values, 1)
-  const step = width / (values.length - 1)
-  const points = values.map((v, i) => `${(i * step).toFixed(1)},${(height - 1 - (v / max) * (height - 3)).toFixed(1)}`).join(" ")
+  const points = values.map((v, i) => `${i},${(height - 1 - (v / max) * (height - 3)).toFixed(2)}`).join(" ")
   return (
-    <svg width={width} height={height} className="shrink-0 stroke-primary" fill="none" strokeWidth={1.25} aria-hidden="true">
-      <polyline points={points} />
+    <svg
+      viewBox={`0 0 ${values.length - 1} ${height}`}
+      preserveAspectRatio="none"
+      className={cn("shrink-0 stroke-primary", className)}
+      fill="none"
+      strokeWidth={1.25}
+      aria-hidden="true"
+    >
+      <polyline points={points} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
     </svg>
+  )
+}
+
+/** A node's second line: its numbers on the left and the recent history on the right. */
+function MetricLine({ text, history, small }: { text: ReactNode; history?: number[]; small?: boolean }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className={cn("min-w-0 truncate text-muted-foreground", small ? "text-[10px]" : "text-xs")}>{text}</span>
+      {history && <Sparkline values={history} className="ml-auto h-4 w-24" />}
+    </div>
   )
 }
 
@@ -437,10 +467,58 @@ function StatBox({
   )
 }
 
+/** Opens or closes a group; sits as a small dot on the bottom border of its node. */
+function ExpandDot({ label, onToggle }: { label: string; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={(event) => {
+        event.stopPropagation()
+        onToggle()
+      }}
+      className="absolute -bottom-2 left-1/2 z-10 flex size-4 -translate-x-1/2 cursor-pointer items-center justify-center rounded-full border border-(--node-edge) bg-(--node) text-muted-foreground shadow-xs outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <ChevronDownIcon className="size-2.5" />
+    </button>
+  )
+}
+
+/** Half-dots on the sides of a node where its lines attach; only the outer half shows. */
+function Ports({ left, right, active, top }: { left?: boolean; right?: boolean; active?: boolean; top?: number }) {
+  const tone = active ? "bg-primary" : "bg-(--node-edge)"
+  return (
+    <>
+      {left && (
+        <span
+          aria-hidden
+          className={cn("absolute right-[calc(100%+1px)] h-2.5 w-[5px] -translate-y-1/2 rounded-l-full transition-colors", top === undefined && "top-1/2", tone)}
+          style={top === undefined ? undefined : { top }}
+        />
+      )}
+      {right && (
+        <span
+          aria-hidden
+          className={cn("absolute left-[calc(100%+1px)] h-2.5 w-[5px] -translate-y-1/2 rounded-r-full transition-colors", top === undefined && "top-1/2", tone)}
+          style={top === undefined ? undefined : { top }}
+        />
+      )}
+    </>
+  )
+}
+
+/** The sparkline only draws when there is something to show. */
+const sparkline = (stats: HostStats | null) => stats !== null && stats.history.length >= 2 && stats.history.some((v) => v > 0)
+
 const errorShare = (stats: HostStats | null) => (stats && stats.requests > 0 ? stats.codes["5xx"] / stats.requests : 0)
 
+/** A host whose responses are failing gets a red tint on its card instead of a marker. */
+const failing = (stats: HostStats | null) => errorShare(stats) > 0.01
+const FAILING = "border-destructive/50 bg-destructive/10"
+
+
 /** Lines are solid, so overlaps and joints don't show; this is the grey a faded line would have had over the background. */
-const quiet = (percent: number) => `color-mix(in oklab, var(--muted-foreground) ${percent}%, var(--background))`
+const quiet = (percent: number) => `color-mix(in oklab, var(--muted-foreground) ${percent}%, var(--canvas))`
 
 const edgeWidth = (count: number) => clamp(1.25 + Math.sqrt(count) * 1.1, 1.25, 9)
 
@@ -450,6 +528,8 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
 
   const [manualExpanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [pinned, setPinned] = useState<string | null>(null)
+  /** Open groups that show every member instead of folding the rest into a "more" row. */
+  const [showAll, setShowAll] = useState<Set<string>>(() => new Set())
   const [hovered, setHovered] = useState<string | null>(null)
   const [isolate, setIsolate] = useState(false)
   const [weighting, setWeighting] = useState<Weighting>("traffic")
@@ -458,6 +538,10 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
   const metrics = useMetrics(true, windowSeconds)
   const live = metrics?.ok && metrics.enabled && metrics.perHost ? metrics : null
   const byTraffic = weighting === "traffic" && live !== null
+  /** Host rows get a second line for traffic when there are live numbers. */
+  const hostRowH = live !== null ? 44 : PANEL_ROW_H
+  /** Destination rows get a second line for traffic when the lines are weighted by it. */
+  const destRowH = byTraffic ? 44 : PANEL_ROW_H
   const upstreams = useUpstreamHealth(true)
   const tlsStatus = useTlsStatus(true)
   const siteHosts = (id: string) => raw.hosts.get(id)?.site.hosts ?? []
@@ -530,10 +614,21 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
     return { weight, steps, dests }
   }, [raw, shownPaths, hostStats, byTraffic])
 
-  // A group box stands in for its members while it is collapsed.
+  // Members an open group folds into its "more" row, so their lines end there.
+  const folded = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const group of [...view.hostGroups, ...view.destGroups]) {
+      if (group.members.length < 2 || !expanded.has(group.id)) continue
+      for (const id of splitMembers(group.members, pinned, showAll.has(group.id)).hidden) map.set(id, `${group.id}:more`)
+    }
+    return map
+  }, [view, expanded, pinned, showAll])
+
+  // A group box stands in for its members while it is collapsed, and its "more" row for the folded ones.
   const resolve = (id: string) => {
     const group = view.groupOf.get(id)
-    return group && group.members.length > 1 && !expanded.has(group.id) ? group.id : id
+    if (group && group.members.length > 1 && !expanded.has(group.id)) return group.id
+    return folded.get(id) ?? id
   }
 
   /** The nodes a path visits while groups are collapsed: boxes, and waypoints that carry a line past a column. */
@@ -547,8 +642,8 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
   const layout = useMemo(() => {
     const steps = view.middle.length
     const last = steps + 1
-    const hostItems = columnItems(view.hostGroups, expanded, HOST_H)
-    const destItems = columnItems(view.destGroups, expanded, DEST_H)
+    const hostItems = columnItems(view.hostGroups, expanded, HOST_H, pinned, showAll, hostRowH)
+    const destItems = columnItems(view.destGroups, expanded, DEST_H, pinned, showAll, destRowH)
 
     const mean = (ranks: number[]) => ranks.reduce((sum, r) => sum + r, 0) / ranks.length
     const middle = view.middle.map((ids) => {
@@ -556,7 +651,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
       ids.forEach((id, rank) => {
         const wp = view.waypoints.get(id)
         const key = wp ? waypointId(wp) : id
-        const item = found.get(key) ?? { id: key, wp: wp !== undefined, height: wp ? WP_H : STEP_H, ranks: [] }
+        const item = found.get(key) ?? { id: key, wp: wp !== undefined, height: wp ? WP_H : stepHeight(raw.steps.get(id)?.chip ?? { label: id }), ranks: [] }
         item.ranks.push(rank)
         found.set(key, item)
       })
@@ -578,11 +673,20 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
     const tops = heights.map((column) => stack(column, total))
     const y = new Map<string, number>()
     const col = new Map<string, number>()
-    hostItems.forEach((item, i) => (y.set(item.id, tops[0][i] + item.height / 2), col.set(item.id, 0)))
+    const place = (items: Item[], itemTops: number[], column: number) =>
+      items.forEach((item, i) => {
+        if (item.kind === "panel") {
+          item.rows.forEach((row, r) => (y.set(row.id, itemTops[i] + item.centers[r]), col.set(row.id, column)))
+        } else {
+          y.set(item.id, itemTops[i] + item.height / 2)
+          col.set(item.id, column)
+        }
+      })
+    place(hostItems, tops[0], 0)
     middle.forEach((items, k) =>
       items.forEach((item, i) => (y.set(item.id, tops[k + 1][i] + item.height / 2), col.set(item.id, k + 1))),
     )
-    destItems.forEach((item, i) => (y.set(item.id, tops[last][i] + item.height / 2), col.set(item.id, last)))
+    place(destItems, tops[last], last)
 
     // A line that skips a column runs straight through it, at the height of its waypoint.
     const columnOf = (id: string) => col.get(id) ?? 0
@@ -692,7 +796,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
       maxWeight: Math.max(...[...edgeMap.values()].map((edge) => edge.count), 1),
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, expanded, shownPaths, flow])
+  }, [view, expanded, shownPaths, flow, folded, pinned, showAll, hostRowH, destRowH])
 
   const lineWidth = (edge: Edge) =>
     byTraffic ? 1.25 + 8 * Math.sqrt(edge.count / layout.maxWeight) : edgeWidth(edge.count)
@@ -710,18 +814,35 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
     }
     return { nodes, edges }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focus, shownPaths, expanded, view])
+  }, [focus, shownPaths, expanded, view, folded])
 
   const dimmed = (ids: string[]) => lit !== null && !ids.some((id) => lit.nodes.has(id))
-  const toggleGroup = (id: string) =>
+  const toggleGroup = (id: string) => {
     setExpanded((current) => {
       const next = new Set(current)
       if (!next.delete(id)) next.add(id)
       return next
     })
+    setShowAll((current) => {
+      if (!current.has(id)) return current
+      const next = new Set(current)
+      next.delete(id)
+      return next
+    })
+  }
+  const setAllShown = (id: string, all: boolean) =>
+    setShowAll((current) => {
+      const next = new Set(current)
+      if (all) next.add(id)
+      else next.delete(id)
+      return next
+    })
   const allGroups = [...view.hostGroups, ...view.destGroups].filter((group) => group.members.length > 1)
   const allOpen = allGroups.length > 0 && allGroups.every((group) => expanded.has(group.id))
-  const toggleAll = () => setExpanded(allOpen ? new Set() : new Set(allGroups.map((group) => group.id)))
+  const toggleAll = () => {
+    setExpanded(allOpen ? new Set() : new Set(allGroups.map((group) => group.id)))
+    if (allOpen) setShowAll(new Set())
+  }
 
   const nodeProps = (id: string) => ({
     role: "button",
@@ -785,7 +906,9 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
   const drawerRate = live ? (estimateTraffic(drawerParts)?.stats.rate ?? 0) : null
 
   const cols = layout.colX
-  const base_ring = "absolute rounded-md border transition-opacity outline-none focus-visible:ring-2 focus-visible:ring-ring"
+  const rowClass =
+    "relative flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-(--node-edge) bg-(--node) px-2.5 outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-ring"
+  const base_ring = "absolute rounded-xl border border-(--node-edge) transition-opacity outline-none focus-visible:ring-2 focus-visible:ring-ring"
 
   return (
     <div className="flex h-full flex-col">
@@ -891,7 +1014,8 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
             <div className="relative" style={{ height: layout.total }}>
               <div className="absolute inset-x-0 top-0" style={{ height: layout.total }}>
                 <svg className="absolute size-full overflow-visible" style={{ left: -PAD }} aria-hidden="true">
-                  {layout.edges.map((edge) => {
+                  {/* SVG paints in document order, so highlighted lines go last to sit on top of the rest. */}
+                  {(lit ? [...layout.edges].sort((a, b) => Number(lit.edges.has(a.key)) - Number(lit.edges.has(b.key))) : layout.edges).map((edge) => {
                     const on = lit?.edges.has(edge.key)
                     return (
                       <path
@@ -899,7 +1023,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
                         d={edge.d}
                         fill="none"
                         className="transition-[stroke]"
-                        style={{ stroke: on ? "var(--primary)" : quiet(lit ? 10 : 30) }}
+                        style={{ stroke: on ? "var(--primary)" : quiet(lit ? 12 : 42) }}
                         strokeWidth={lineWidth(edge)}
                       >
                         <title>
@@ -916,22 +1040,82 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
 
                 {layout.hostItems.map((item, i) => {
                   const style = { left: cols[0] - PAD, width: layout.widths[0], top: layout.hostTops[i], height: item.height }
-                  if (item.kind === "header") {
+                  if (item.kind === "panel") {
                     return (
-                      <button
+                      <div
                         key={item.id}
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          toggleGroup(item.group.id)
-                        }}
-                        className="absolute flex items-center gap-1 px-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                        className="absolute flex flex-col gap-1 rounded-2xl border border-(--node-edge) bg-foreground/[0.03] p-2"
                         style={style}
                       >
-                        <ChevronDownIcon className="size-3.5" />
-                        {item.group.label}
-                        <span className="font-normal">· {item.group.members.length}</span>
-                      </button>
+                        <button
+                          type="button"
+                          aria-label={`Close ${item.group.label}`}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            toggleGroup(item.group.id)
+                          }}
+                          className="flex h-6 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-1 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <span className="truncate text-[13px] font-semibold">{item.group.label}</span>
+                          <span className="shrink-0 text-xs text-muted-foreground">· {item.group.members.length}</span>
+                          <ChevronUpIcon className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
+                        </button>
+                        {item.rows.map((row) => {
+                          if (row.more !== undefined || row.fewer) {
+                            return (
+                              <button
+                                key={row.id}
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  setAllShown(item.group.id, row.more !== undefined)
+                                }}
+                                className="flex shrink-0 cursor-pointer items-center justify-center gap-1 rounded-lg border border-dashed border-(--node-edge) text-xs text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                                style={{ height: PANEL_ROW_H }}
+                              >
+                                {row.more !== undefined ? <ChevronDownIcon className="size-3" /> : <ChevronUpIcon className="size-3" />}
+                                {row.more !== undefined ? `Show ${row.more} more` : "Show fewer"}
+                              </button>
+                            )
+                          }
+                        const node = raw.hosts.get(row.id)
+                        if (!node) return null
+                        const stats = hostStats.get(row.id) ?? null
+                        const others = node.site.hosts.length - 1
+                        return (
+                          <StatBox
+                            stats={stats}
+                            windowLabel={win.phrase}
+                            key={row.id}
+                            {...nodeProps(row.id)}
+                            className={cn(rowClass, failing(stats) && FAILING, focus === row.id && "border-primary", dimmed([row.id]) && "opacity-30")}
+                            style={{ height: row.height }}
+                          >
+                            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                              <div className="flex items-center gap-1.5">
+                                <span className="truncate text-xs font-medium">{hostLabel(node.site.hosts[0] ?? "*")}</span>
+                                {others > 0 && <span className="shrink-0 text-[10px] text-muted-foreground">+{others}</span>}
+                                <TlsBadge badge={hostBadge(node.site.hosts, tlsStatus)} />
+                              </div>
+                              {live !== null && (
+                                <MetricLine
+                                  small
+                                  text={
+                                    stats && stats.requests > 0
+                                      ? `${fmtCount(stats.requests)} req${stats.rate > 0 ? ` · ${fmtRate(stats.rate)}` : ""}`
+                                      : "No traffic yet"
+                                  }
+                                  history={stats?.history}
+                                />
+                              )}
+                            </div>
+                          </StatBox>
+                        )
+                        })}
+                        {item.rows.map((row, r) => row.fewer ? null : (
+                          <Ports key={row.id} right top={item.centers[r]} active={lit !== null && !dimmed([row.id])} />
+                        ))}
+                      </div>
                     )
                   }
                   if (item.kind === "group") {
@@ -944,38 +1128,31 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
                         {...nodeProps(item.id)}
                         className={cn(
                           base_ring,
-                          "flex cursor-pointer flex-col justify-center gap-0.5 bg-card px-3 shadow-[2px_2px_0_var(--border),4px_4px_0_var(--border)]",
+                          "flex cursor-pointer flex-col justify-center gap-0.5 rounded-2xl bg-(--node) px-3 shadow-(--stack)",
+                          item.group.members.some((id) => failing(hostStats.get(id) ?? null)) && FAILING,
                           focus === item.id && "border-primary",
                           dimmed(item.group.members) && "opacity-30",
                         )}
                         style={style}
                       >
-                        <div className="flex items-center gap-1.5">
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            aria-label={`Open ${item.group.label}`}
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              toggleGroup(item.group.id)
-                            }}
-                          >
-                            <ChevronRightIcon />
-                          </Button>
-                          <span className="truncate text-sm font-medium">{item.group.label}</span>
-                          {item.group.internal && <LockIcon className="size-3 shrink-0 text-muted-foreground" />}
-                          <TlsBadge badge={groupBadge(item.group.members.map(siteHosts), tlsStatus)} />
-                        </div>
-                        <span className="pl-7 text-xs text-muted-foreground">
-                          {item.group.members.length} sites
-                          {stats && stats.requests > 0 && ` · ${fmtCount(stats.requests)} req`}
-                          {stats && stats.rate > 0 && ` · ${fmtRate(stats.rate)}`}
-                        </span>
-                        {stats && (
-                          <div className="absolute top-1/2 right-3 -translate-y-1/2">
-                            <Sparkline values={stats.history} />
+                        <Ports right active={lit !== null && !dimmed(item.group.members)} />
+                      <div className="flex min-w-0 flex-col gap-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="truncate text-sm font-medium">{item.group.label}</span>
+                            <TlsBadge badge={groupBadge(item.group.members.map(siteHosts), tlsStatus)} />
                           </div>
-                        )}
+                          <MetricLine
+                            text={[
+                              `${item.group.members.length} sites`,
+                              stats && stats.requests > 0 && `${fmtCount(stats.requests)} req`,
+                              stats && stats.rate > 0 && fmtRate(stats.rate),
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                            history={stats?.history}
+                          />
+                        </div>
+                        <ExpandDot label={`Open ${item.group.label}`} onToggle={() => toggleGroup(item.group.id)} />
                       </StatBox>
                     )
                   }
@@ -999,26 +1176,21 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
                       {...nodeProps(item.id)}
                       className={cn(
                         base_ring,
-                        "flex cursor-pointer flex-col justify-center gap-0.5 bg-card px-3 shadow-xs",
+                        "flex cursor-pointer flex-col justify-center gap-0.5 bg-(--node) px-3 shadow-xs",
+                        failing(stats) && FAILING,
                         focus === item.id && "border-primary",
                         dimmed([item.id]) && "opacity-30",
                       )}
                       style={style}
                     >
-                      <div className="flex items-center gap-1.5">
-                        <span className="truncate text-sm font-medium">{hostLabel(primary)}</span>
-                        {isInternal(node.site) && <LockIcon className="size-3 shrink-0 text-muted-foreground" />}
-                        <TlsBadge badge={hostBadge(node.site.hosts, tlsStatus)} />
-                        {errorShare(stats) > 0.01 && (
-                          <span className="size-1.5 shrink-0 rounded-full bg-destructive" title="Some responses were 5xx" />
-                        )}
-                      </div>
-                      {subtitle && <span className="truncate text-xs text-muted-foreground">{subtitle}</span>}
-                      {stats && (
-                        <div className="absolute top-1/2 right-3 -translate-y-1/2">
-                          <Sparkline values={stats.history} />
+                      <Ports right active={lit !== null && !dimmed([item.id])} />
+                      <div className="flex min-w-0 flex-col gap-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="truncate text-sm font-medium">{hostLabel(primary)}</span>
+                          <TlsBadge badge={hostBadge(node.site.hosts, tlsStatus)} />
                         </div>
-                      )}
+                        {(subtitle || sparkline(stats)) && <MetricLine text={subtitle} history={stats?.history} />}
+                      </div>
                     </StatBox>
                   )
                 })}
@@ -1033,18 +1205,18 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
                         {...nodeProps(item.id)}
                         className={cn(
                           base_ring,
-                          "flex cursor-pointer items-center justify-between gap-2 bg-secondary/50 px-2",
+                          "flex cursor-pointer flex-col justify-center bg-(--node) px-3 shadow-xs",
                           focus === item.id && "border-primary",
                           dimmed([item.id]) && "opacity-30",
                         )}
                         style={{ left: cols[k + 1] - PAD, width: layout.widths[k + 1], top: layout.midTops[k][i], height: item.height }}
                       >
-                        <span className="line-clamp-2 min-w-0 text-xs leading-snug font-medium" title={chip?.detail ?? chip?.label}>
-                          {chip?.label ?? item.id}
-                        </span>
-                        {byTraffic && (
-                          <span className="shrink-0 text-xs text-muted-foreground">{fmtCount(flow.steps.get(item.id) ?? 0)}</span>
-                        )}
+                        <Ports left right active={lit !== null && !dimmed([item.id])} />
+                        <StepNode
+                          chip={chip ?? { label: item.id }}
+                          available={layout.widths[k + 1] - 24}
+                          meta={byTraffic ? fmtCount(flow.steps.get(item.id) ?? 0) : undefined}
+                        />
                       </div>
                     )
                   }),
@@ -1052,22 +1224,73 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
 
                 {layout.destItems.map((item, i) => {
                   const style = { left: cols[layout.last] - PAD, width: layout.widths[layout.last], top: layout.destTops[i], height: item.height }
-                  if (item.kind === "header") {
+                  if (item.kind === "panel") {
                     return (
-                      <button
+                      <div
                         key={item.id}
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          toggleGroup(item.group.id)
-                        }}
-                        className="absolute flex items-center gap-1 px-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                        className="absolute flex flex-col gap-1 rounded-2xl border border-(--node-edge) bg-foreground/[0.03] p-2"
                         style={style}
                       >
-                        <ChevronDownIcon className="size-3.5" />
-                        {item.group.label}
-                        <span className="font-normal">· {item.group.members.length}</span>
-                      </button>
+                        <button
+                          type="button"
+                          aria-label={`Close ${item.group.label}`}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            toggleGroup(item.group.id)
+                          }}
+                          className="flex h-6 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-1 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <span className="truncate text-[13px] font-semibold font-mono">{item.group.label}</span>
+                          
+                          <span className="shrink-0 text-xs text-muted-foreground">· {item.group.members.length}</span>
+                          <ChevronUpIcon className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
+                        </button>
+                        {item.rows.map((row) => {
+                          if (row.more !== undefined || row.fewer) {
+                            return (
+                              <button
+                                key={row.id}
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  setAllShown(item.group.id, row.more !== undefined)
+                                }}
+                                className="flex shrink-0 cursor-pointer items-center justify-center gap-1 rounded-lg border border-dashed border-(--node-edge) text-xs text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                                style={{ height: PANEL_ROW_H }}
+                              >
+                                {row.more !== undefined ? <ChevronDownIcon className="size-3" /> : <ChevronUpIcon className="size-3" />}
+                                {row.more !== undefined ? `Show ${row.more} more` : "Show fewer"}
+                              </button>
+                            )
+                          }
+                        const node = raw.dests.get(row.id)
+                        if (!node) return null
+                        const Icon = DEST_ICONS[node.dest.kind]
+                        const label = node.dest.kind === "proxy" ? (node.dest.upstreams?.[0] ?? "") : node.dest.summary
+                        return (
+                          <div
+                            key={row.id}
+                            {...nodeProps(row.id)}
+                            className={cn(rowClass, focus === row.id && "border-primary", dimmed([row.id]) && "opacity-30")}
+                            style={{ height: row.height }}
+                          >
+                            <Icon className="size-3.5 shrink-0 text-muted-foreground" />
+                            <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                              <div className="flex items-center gap-1.5">
+                                <span className={cn("truncate text-xs", node.dest.kind === "proxy" && "font-mono text-[11px]")}>{label}</span>
+                                <HealthDot health={destHealth(row.id)?.health ?? null} />
+                              </div>
+                              {byTraffic && (
+                                <span className="truncate text-[10px] text-muted-foreground">{fmtCount(flow.dests.get(row.id) ?? 0)} req</span>
+                              )}
+                            </div>
+                          </div>
+                        )
+                        })}
+                        {item.rows.map((row, r) => row.fewer ? null : (
+                          <Ports key={row.id} left top={item.centers[r]} active={lit !== null && !dimmed([row.id])} />
+                        ))}
+                      </div>
                     )
                   }
                   if (item.kind === "group") {
@@ -1077,36 +1300,29 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
                         {...nodeProps(item.id)}
                         className={cn(
                           base_ring,
-                          "flex cursor-pointer flex-col justify-center gap-0.5 bg-card px-3 shadow-[2px_2px_0_var(--border),4px_4px_0_var(--border)]",
+                          "flex cursor-pointer flex-col justify-center gap-0.5 rounded-2xl bg-(--node) px-3 shadow-(--stack)",
                           focus === item.id && "border-primary",
                           dimmed(item.group.members) && "opacity-30",
                         )}
                         style={style}
                       >
-                        <div className="flex items-center gap-1.5">
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            aria-label={`Open ${item.group.label}`}
-                            onClick={(event) => {
-                              event.stopPropagation()
-                              toggleGroup(item.group.id)
-                            }}
-                          >
-                            <ChevronRightIcon />
-                          </Button>
-                          <span className="truncate font-mono text-sm font-medium">{item.group.label}</span>
-                          <HealthDot
-                            className="ml-auto"
-                            health={worstHealth(item.group.members.map(destHealth))}
-                            title="Worst state of the upstreams in this group"
-                          />
+                        <Ports left active={lit !== null && !dimmed(item.group.members)} />
+                        <div className="flex min-w-0 flex-col gap-1">
+                          <div className="flex items-center gap-1.5">
+                            <span className="truncate font-mono text-sm font-medium">{item.group.label}</span>
+                            <HealthDot
+                              className="ml-auto"
+                              health={worstHealth(item.group.members.map(destHealth))}
+                              title="Worst state of the upstreams in this group"
+                            />
+                          </div>
+                          <span className="truncate text-xs text-muted-foreground">
+                            {item.group.members.length} destinations
+                            {byTraffic &&
+                              ` · ${fmtCount(item.group.members.reduce((sum, id) => sum + (flow.dests.get(id) ?? 0), 0))} req`}
+                          </span>
                         </div>
-                        <span className="pl-7 text-xs text-muted-foreground">
-                          {item.group.members.length} destinations
-                          {byTraffic &&
-                            ` · ${fmtCount(item.group.members.reduce((sum, id) => sum + (flow.dests.get(id) ?? 0), 0))} req`}
-                        </span>
+                        <ExpandDot label={`Open ${item.group.label}`} onToggle={() => toggleGroup(item.group.id)} />
                       </div>
                     )
                   }
@@ -1120,12 +1336,13 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
                       {...nodeProps(item.id)}
                       className={cn(
                         base_ring,
-                        "flex cursor-pointer items-center gap-2 bg-card px-3 shadow-xs",
+                        "flex cursor-pointer items-center gap-2 bg-(--node) px-3 shadow-xs",
                         focus === item.id && "border-primary",
                         dimmed([item.id]) && "opacity-30",
                       )}
                       style={style}
                     >
+                      <Ports left active={lit !== null && !dimmed([item.id])} />
                       <Icon className="size-4 shrink-0 text-muted-foreground" />
                       <span className={cn("truncate text-sm", node.dest.kind === "proxy" && "font-mono text-xs")}>
                         {label}

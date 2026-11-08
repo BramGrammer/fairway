@@ -235,3 +235,27 @@
     opacity: 0;
   }
 }
+
+/* The routes canvas: nodes are cards on a surface of a different tone, with an edge that stays visible in light and dark. */
+:root {
+  --canvas: var(--background);
+  --node: var(--page);
+}
+
+.dark {
+  --canvas: var(--page);
+  --node: var(--card);
+}
+
+:root,
+.dark {
+  --node-edge: color-mix(in oklab, var(--foreground) 16%, var(--node));
+}
+
+/* A group of nodes: two thin outlines peek out below, the farther one fading, so it reads as a stack. */
+:root,
+.dark {
+  --stack:
+    0 8px 0 -5px var(--node), 0 8px 0 -4px var(--node-edge), 0 16px 0 -9px var(--node),
+    0 16px 0 -8px color-mix(in oklab, var(--node-edge) 45%, transparent);
+}
