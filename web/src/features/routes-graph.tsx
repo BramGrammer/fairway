@@ -113,7 +113,13 @@ interface Waypoint {
   from: string
   to: string
   col: number
+  /** Which end the lines sharing this waypoint have in common: the same source, the same target, or neither. */
+  shared: "from" | "to" | "none"
 }
+
+/** Waypoints are named after the ends they share, so lines that travel together through an empty column merge. */
+const waypointKey = (wp: Waypoint, name: (id: string) => string = (id) => id) =>
+  `wp:${wp.shared === "to" ? "*" : name(wp.from)}>${wp.shared === "from" ? "*" : name(wp.to)}@${wp.col}`
 
 interface Arranged {
   /** The columns between hosts and destinations, each listing its boxes and waypoints top to bottom. */
@@ -266,19 +272,38 @@ function arrange(raw: Raw, paths: Path[]): Arranged {
   // Every path becomes a chain from host to destination; a line that skips columns gets a waypoint in each.
   const layer = layerSteps(paths)
   const last = Math.max(0, ...layer.values()) + 1
+  const hops = (path: Path) => {
+    const nodes = [path.host, ...path.steps, path.dest]
+    const cols = [0, ...path.steps.map((id) => layer.get(id) ?? 1), last]
+    return nodes.slice(1).map((to, i) => ({ from: nodes[i], to, start: cols[i], end: cols[i + 1] }))
+  }
+
+  // Lines that leave the same box, or arrive at the same one, share a waypoint while they cross a column together.
+  const leaving = new Map<string, Set<string>>()
+  const arriving = new Map<string, Set<string>>()
+  for (const path of paths) {
+    for (const { from, to, start, end } of hops(path)) {
+      for (let col = start + 1; col < end; col++) {
+        leaving.set(`${from}@${col}`, (leaving.get(`${from}@${col}`) ?? new Set()).add(to))
+        arriving.set(`${to}@${col}`, (arriving.get(`${to}@${col}`) ?? new Set()).add(from))
+      }
+    }
+  }
+
   const waypoints = new Map<string, Waypoint>()
   const chains = new Map<Path, string[]>()
   for (const path of paths) {
-    const nodes = [path.host, ...path.steps, path.dest]
-    const cols = [0, ...path.steps.map((id) => layer.get(id) ?? 1), last]
     const chain = [path.host]
-    for (let i = 1; i < nodes.length; i++) {
-      for (let col = cols[i - 1] + 1; col < cols[i]; col++) {
-        const id = `wp:${nodes[i - 1]}>${nodes[i]}@${col}`
-        waypoints.set(id, { from: nodes[i - 1], to: nodes[i], col })
+    for (const { from, to, start, end } of hops(path)) {
+      for (let col = start + 1; col < end; col++) {
+        const out = leaving.get(`${from}@${col}`)?.size ?? 1
+        const into = arriving.get(`${to}@${col}`)?.size ?? 1
+        const wp: Waypoint = { from, to, col, shared: out > 1 && out >= into ? "from" : into > 1 ? "to" : "none" }
+        const id = waypointKey(wp)
+        waypoints.set(id, wp)
         chain.push(id)
       }
-      chain.push(nodes[i])
+      chain.push(to)
     }
     chains.set(path, chain)
   }
@@ -414,6 +439,9 @@ function StatBox({
 
 const errorShare = (stats: HostStats | null) => (stats && stats.requests > 0 ? stats.codes["5xx"] / stats.requests : 0)
 
+/** Lines are solid, so overlaps and joints don't show; this is the grey a faded line would have had over the background. */
+const quiet = (percent: number) => `color-mix(in oklab, var(--muted-foreground) ${percent}%, var(--background))`
+
 const edgeWidth = (count: number) => clamp(1.25 + Math.sqrt(count) * 1.1, 1.25, 9)
 
 export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: string }) {
@@ -515,7 +543,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
   }
 
   /** The nodes a path visits while groups are collapsed: boxes, and waypoints that carry a line past a column. */
-  const waypointId = (wp: Waypoint) => `wp:${resolve(wp.from)}>${resolve(wp.to)}@${wp.col}`
+  const waypointId = (wp: Waypoint) => waypointKey(wp, resolve)
   const resolveChain = (chain: string[]) =>
     chain.map((id) => {
       const wp = view.waypoints.get(id)
@@ -565,14 +593,72 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
     )
     destItems.forEach((item, i) => (y.set(item.id, tops[last][i] + item.height / 2), col.set(item.id, last)))
 
-    // A waypoint is a point in the middle of its column; a box has an edge on either side.
-    const leftOf = (id: string) => colX[col.get(id) ?? 0] + (id.startsWith("wp:") ? widths[col.get(id) ?? 0] / 2 : 0)
-    const rightOf = (id: string) => colX[col.get(id) ?? 0] + widths[col.get(id) ?? 0] / (id.startsWith("wp:") ? 2 : 1)
+    // A line that skips a column runs straight through it, at the height of its waypoint.
+    const columnOf = (id: string) => col.get(id) ?? 0
+    const leftOf = (id: string) => colX[columnOf(id)]
+    const rightOf = (id: string) => colX[columnOf(id)] + widths[columnOf(id)]
+
+    const resolved = shownPaths.map((path) => ({ path, chain: resolveChain(view.chains.get(path) ?? []) }))
+
+    // Pull the middle columns towards what they connect to, so lines run straight instead of stepping between columns.
+    const neighbours = new Map<string, Set<string>>()
+    const touch = (a: string, b: string) => neighbours.set(a, (neighbours.get(a) ?? new Set()).add(b))
+    for (const { chain } of resolved) {
+      for (let i = 1; i < chain.length; i++) {
+        touch(chain[i - 1], chain[i])
+        touch(chain[i], chain[i - 1])
+      }
+    }
+    /** The boxes at either end of the stretch of waypoints a waypoint belongs to. */
+    const anchors = new Map<string, string[]>()
+    const anchorsOf = (waypoint: string) => {
+      const known = anchors.get(waypoint)
+      if (known) return known
+      const seen = new Set([waypoint])
+      const ends = new Set<string>()
+      for (const id of seen) {
+        for (const next of neighbours.get(id) ?? []) {
+          if (next.startsWith("wp:")) seen.add(next)
+          else ends.add(next)
+        }
+      }
+      anchors.set(waypoint, [...ends])
+      return [...ends]
+    }
+    const average = (ids: string[], fallback: number) => {
+      const ys = ids.flatMap((id) => (y.has(id) ? [y.get(id) as number] : []))
+      return ys.length ? ys.reduce((sum, v) => sum + v, 0) / ys.length : fallback
+    }
+    for (let pass = 0; pass < 12; pass++) {
+      for (const items of middle) {
+        const pos = items.map((item) =>
+          average(item.wp ? anchorsOf(item.id) : [...(neighbours.get(item.id) ?? [])], y.get(item.id) ?? 0),
+        )
+        const apart = (a: number, b: number) => (items[a].height + items[b].height) / 2 + MIN_GAP
+        const settle = (forward: boolean) => {
+          const order = items.map((_, i) => i)
+          if (!forward) order.reverse()
+          order.forEach((i, n) => {
+            if (n === 0) {
+              pos[i] = forward
+                ? Math.max(pos[i], items[i].height / 2 + MIN_GAP)
+                : Math.min(pos[i], total - items[i].height / 2 - MIN_GAP)
+            } else {
+              const before = order[n - 1]
+              pos[i] = forward ? Math.max(pos[i], pos[before] + apart(before, i)) : Math.min(pos[i], pos[before] - apart(before, i))
+            }
+          })
+        }
+        settle(true)
+        settle(false)
+        settle(true)
+        items.forEach((item, i) => y.set(item.id, pos[i]))
+      }
+    }
 
     const edgeMap = new Map<string, Edge>()
-    for (const path of shownPaths) {
+    for (const { path, chain } of resolved) {
       const weight = flow.weight(path)
-      const chain = resolveChain(view.chains.get(path) ?? [])
       for (let i = 1; i < chain.length; i++) {
         const from = chain[i - 1]
         const to = chain[i]
@@ -582,8 +668,20 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
           existing.count += weight
           continue
         }
-        const d = curve(rightOf(from), y.get(from) ?? 0, leftOf(to), y.get(to) ?? 0)
-        edgeMap.set(key, { key, from, to, count: weight, d })
+        const start: [number, number] = [rightOf(from), y.get(from) ?? 0]
+        const end: [number, number] = [leftOf(to), y.get(to) ?? 0]
+        edgeMap.set(key, { key, from, to, count: weight, d: curve(...start, ...end) })
+      }
+      // A waypoint's own stretch is drawn once, however many lines leave it.
+      for (const id of chain.filter((node) => node.startsWith("wp:"))) {
+        const key = `run:${id}`
+        const existing = edgeMap.get(key)
+        if (existing) {
+          existing.count += weight
+          continue
+        }
+        const at = y.get(id) ?? 0
+        edgeMap.set(key, { key, from: id, to: id, count: weight, d: `M ${leftOf(id)} ${at} L ${rightOf(id)} ${at}` })
       }
     }
 
@@ -597,13 +695,16 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
       destItems,
       middle,
       hostTops: tops[0],
-      midTops: tops.slice(1, -1),
+      midTops: middle.map((items) => items.map((item) => (y.get(item.id) ?? 0) - item.height / 2)),
       destTops: tops[last],
       edges: [...edgeMap.values()],
       maxWeight: Math.max(...[...edgeMap.values()].map((edge) => edge.count), 1),
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, expanded, shownPaths, width, flow])
+
+  const lineWidth = (edge: Edge) =>
+    byTraffic ? 1.25 + 8 * Math.sqrt(edge.count / layout.maxWeight) : edgeWidth(edge.count)
 
   // Everything on a path through the focused box lights up; the rest recedes.
   const lit = useMemo(() => {
@@ -614,6 +715,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
       for (const id of [path.host, ...path.steps, path.dest]) nodes.add(id)
       const chain = resolveChain(view.chains.get(path) ?? [])
       for (let i = 1; i < chain.length; i++) edges.add(`${chain[i - 1]}>${chain[i]}`)
+      for (const id of chain) if (id.startsWith("wp:")) edges.add(`run:${id}`)
     }
     return { nodes, edges }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -809,14 +911,9 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
                         key={edge.key}
                         d={edge.d}
                         fill="none"
-                        className={cn(
-                          "transition-[stroke,opacity]",
-                          on ? "stroke-primary" : "stroke-muted-foreground",
-                          lit ? (on ? "opacity-100" : "opacity-10") : "opacity-30",
-                        )}
-                        strokeWidth={
-                          byTraffic ? 1.25 + 8 * Math.sqrt(edge.count / layout.maxWeight) : edgeWidth(edge.count)
-                        }
+                        className="transition-[stroke]"
+                        style={{ stroke: on ? "var(--primary)" : quiet(lit ? 10 : 30) }}
+                        strokeWidth={lineWidth(edge)}
                       >
                         <title>
                           {byTraffic
