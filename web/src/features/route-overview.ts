@@ -5,8 +5,10 @@ export interface OverviewData {
   raw: {
     hosts: Map<string, { site: Site }>
     handlers: Map<string, { chips: Chip[] }>
+    /** Single middleware nodes, when the graph draws them one by one. */
+    steps?: Map<string, { chip: Chip }>
     dests: Map<string, { dest: Destination }>
-    paths: { host: string; handler: string; dest: string; match: string }[]
+    paths: { host: string; handler: string; dest: string; match: string; steps?: string[] }[]
   }
   groups: { id: string; label: string; column: "host" | "dest"; members: string[] }[]
   /** Requests per destination id while traffic is known; null otherwise. */
@@ -70,9 +72,10 @@ export function describeNode(data: OverviewData, id: string): NodeOverview | nul
   }
 
   const handler = raw.handlers.get(id)
-  if (handler) {
+  const step = raw.steps?.get(id)
+  if (handler || step) {
     const instances = new Map<string, RuleInstance>()
-    for (const path of raw.paths.filter((p) => p.handler === id)) {
+    for (const path of raw.paths.filter((p) => p.handler === id || (p.steps ?? []).includes(id))) {
       const site = raw.hosts.get(path.host)?.site
       const dest = raw.dests.get(path.dest)
       if (!site || !dest) continue
@@ -93,7 +96,7 @@ export function describeNode(data: OverviewData, id: string): NodeOverview | nul
       }
       instance.destinations.push({ id: path.dest, label: destLabel(dest.dest), dest: dest.dest })
     }
-    return { kind: "rule", middleware: handler.chips, instances: [...instances.values()] }
+    return { kind: "rule", middleware: handler ? handler.chips : [step!.chip], instances: [...instances.values()] }
   }
 
   const dest = raw.dests.get(id)

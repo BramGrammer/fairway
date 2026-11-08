@@ -35,6 +35,7 @@ import { groupBadge, hostBadge } from "@/lib/tls-badges"
 import { upstreamHealth, worstHealth } from "@/lib/upstream-health"
 import type { Chip, Destination, HostStats, Site } from "@/lib/api"
 import { nodeKind } from "@/lib/route-drawer"
+import { orderLayers, type Layers, type Link, type Unit } from "@/lib/graph-order"
 import { estimateTraffic, mergeStats, trafficContributions } from "@/lib/traffic"
 import { chipTexts, destTexts, hostTexts, matchesQuery } from "@/features/routes-filter"
 import { PRESSED } from "@/lib/toggle-styles"
@@ -49,7 +50,11 @@ const DEST_ICONS = {
 } as const
 
 const PAD = 16
-const MIN_INNER = 760
+const SIDE_W = 190
+const STEP_W = 150
+const STEP_H = 44
+const WP_H = 4
+const MIN_COL_GAP = 36
 const HOST_H = 44
 const GROUP_H = 64
 const HEADER_H = 28
@@ -67,6 +72,12 @@ interface HandlerNode {
   chips: Chip[]
 }
 
+/** One middleware, shared by every path that passes through it. */
+interface StepNode {
+  id: string
+  chip: Chip
+}
+
 interface DestNode {
   id: string
   dest: Destination
@@ -77,11 +88,14 @@ interface Path {
   handler: string
   dest: string
   match: string
+  /** The middleware this path passes through, in order. */
+  steps: string[]
 }
 
 interface Raw {
   hosts: Map<string, HostNode>
   handlers: Map<string, HandlerNode>
+  steps: Map<string, StepNode>
   dests: Map<string, DestNode>
   paths: Path[]
 }
@@ -94,8 +108,19 @@ interface Group {
   internal: boolean
 }
 
+/** A point that carries a line past a column it has no box in. */
+interface Waypoint {
+  from: string
+  to: string
+  col: number
+}
+
 interface Arranged {
-  handlers: HandlerNode[]
+  /** The columns between hosts and destinations, each listing its boxes and waypoints top to bottom. */
+  middle: string[][]
+  waypoints: Map<string, Waypoint>
+  /** What each path visits from host to destination: boxes and waypoints. */
+  chains: Map<Path, string[]>
   hostGroups: Group[]
   destGroups: Group[]
   groupOf: Map<string, Group>
@@ -117,9 +142,11 @@ function uniqueChips(chips: Chip[]): Chip[] {
   })
 }
 
+const stepId = (chip: Chip) => `mw:${chip.label}`
+
 /** Every route as a path: host -> the middleware stack it passes through -> where it ends up. */
 function buildRaw(sites: Site[]): Raw {
-  const raw: Raw = { hosts: new Map(), handlers: new Map(), dests: new Map(), paths: [] }
+  const raw: Raw = { hosts: new Map(), handlers: new Map(), steps: new Map(), dests: new Map(), paths: [] }
   for (const site of sites) {
     const hostId = `host:${site.hosts.join(",")}|${site.listen.join(",")}`
     raw.hosts.set(hostId, { id: hostId, site, routes: site.rules.length })
@@ -128,6 +155,8 @@ function buildRaw(sites: Site[]): Raw {
       const chips = uniqueChips([...site.middleware, ...rule.middleware])
       const handlerId = `handler:${chips.map((chip) => chip.label).join("|")}`
       if (!raw.handlers.has(handlerId)) raw.handlers.set(handlerId, { id: handlerId, chips })
+      const steps = [...new Set(chips.map(stepId))]
+      for (const chip of chips) if (!raw.steps.has(stepId(chip))) raw.steps.set(stepId(chip), { id: stepId(chip), chip })
 
       for (const dest of rule.destinations) {
         const targets =
@@ -139,7 +168,7 @@ function buildRaw(sites: Site[]): Raw {
             : [{ id: `${dest.kind}:${dest.summary}`, dest }]
         for (const target of targets) {
           if (!raw.dests.has(target.id)) raw.dests.set(target.id, target)
-          raw.paths.push({ host: hostId, handler: handlerId, dest: target.id, match: rule.match })
+          raw.paths.push({ host: hostId, handler: handlerId, dest: target.id, match: rule.match, steps })
         }
       }
     }
@@ -157,26 +186,39 @@ const hostGroupLabel = (site: Site) => {
 const destGroupLabel = (dest: Destination) =>
   dest.kind === "proxy" ? (dest.upstreams?.[0] ?? "").replace(/:\d+$/, "") : "Built-in"
 
+/** Puts each middleware one column after the last one that comes before it on any path. */
+function layerSteps(paths: Path[]): Map<string, number> {
+  const layer = new Map<string, number>()
+  const links: [string, string][] = []
+  for (const path of paths) {
+    path.steps.forEach((id, i) => {
+      layer.set(id, 1)
+      if (i > 0) links.push([path.steps[i - 1], id])
+    })
+  }
+  // The pass limit also stops an inconsistent order (A before B on one path, after it on another) from growing forever.
+  for (let pass = 0; pass < layer.size; pass++) {
+    let changed = false
+    for (const [a, b] of links) {
+      const next = (layer.get(a) ?? 1) + 1
+      if ((layer.get(b) ?? 1) < next) {
+        layer.set(b, next)
+        changed = true
+      }
+    }
+    if (!changed) break
+  }
+  return layer
+}
+
 /** Order the columns to keep crossings down, and gather hosts and destinations into groups. */
 function arrange(raw: Raw, paths: Path[]): Arranged {
   const hostIds = new Set(paths.map((p) => p.host))
-  const handlerIds = new Set(paths.map((p) => p.handler))
   const destIds = new Set(paths.map((p) => p.dest))
 
-  const hostCount = (id: string) => new Set(paths.filter((p) => p.handler === id).map((p) => p.host)).size
-  const handlers = [...raw.handlers.values()]
-    .filter((handler) => handlerIds.has(handler.id))
-    .sort((a, b) => hostCount(b.id) - hostCount(a.id) || a.id.localeCompare(b.id))
-  const handlerIndex = new Map(handlers.map((handler, i) => [handler.id, i]))
-
-  const firstHandler = (hostId: string) =>
-    Math.min(...paths.filter((p) => p.host === hostId).map((p) => handlerIndex.get(p.handler) ?? 0))
   const hosts = [...raw.hosts.values()]
     .filter((host) => hostIds.has(host.id))
-    .sort(
-      (a, b) =>
-        firstHandler(a.id) - firstHandler(b.id) || (a.site.hosts[0] ?? "").localeCompare(b.site.hosts[0] ?? ""),
-    )
+    .sort((a, b) => (a.site.hosts[0] ?? "").localeCompare(b.site.hosts[0] ?? ""))
 
   const groupOf = new Map<string, Group>()
   const collect = (
@@ -206,7 +248,6 @@ function arrange(raw: Raw, paths: Path[]): Arranged {
     hosts.map((host) => ({ id: host.id, label: hostGroupLabel(host.site), internal: isInternal(host.site) })),
     (a, b) => Number(a.internal) - Number(b.internal) || bySize(a, b),
   )
-  // Keep each group's hosts contiguous, in the handler-friendly order they already have.
   const hostOrder = new Map(hostGroups.flatMap((g) => g.members).map((id, i) => [id, i]))
 
   const barycenter = (destId: string) => {
@@ -222,7 +263,53 @@ function arrange(raw: Raw, paths: Path[]): Arranged {
     (a, b) => Number(a.label === "Built-in") - Number(b.label === "Built-in") || bySize(a, b),
   )
 
-  return { handlers, hostGroups, destGroups, groupOf }
+  // Every path becomes a chain from host to destination; a line that skips columns gets a waypoint in each.
+  const layer = layerSteps(paths)
+  const last = Math.max(0, ...layer.values()) + 1
+  const waypoints = new Map<string, Waypoint>()
+  const chains = new Map<Path, string[]>()
+  for (const path of paths) {
+    const nodes = [path.host, ...path.steps, path.dest]
+    const cols = [0, ...path.steps.map((id) => layer.get(id) ?? 1), last]
+    const chain = [path.host]
+    for (let i = 1; i < nodes.length; i++) {
+      for (let col = cols[i - 1] + 1; col < cols[i]; col++) {
+        const id = `wp:${nodes[i - 1]}>${nodes[i]}@${col}`
+        waypoints.set(id, { from: nodes[i - 1], to: nodes[i], col })
+        chain.push(id)
+      }
+      chain.push(nodes[i])
+    }
+    chains.set(path, chain)
+  }
+
+  // The orders above are a starting point; refine them so that as few lines as possible cross.
+  const toUnits = (groups: Group[]): Unit[] => groups.map((group) => ({ key: group.label, members: group.members }))
+  const single = (id: string): Unit => ({ key: id, members: [id] })
+  const middle: Unit[][] = Array.from({ length: last - 1 }, (_, k) => [
+    ...[...layer].filter(([, l]) => l === k + 1).map(([id]) => single(id)),
+    ...[...waypoints].filter(([, w]) => w.col === k + 1).map(([id]) => single(id)),
+  ])
+  const links: Link[] = [...chains.values()].flatMap((chain) =>
+    chain.slice(1).map((id, i): Link => [chain[i], id]),
+  )
+  const ordered: Layers = orderLayers(links, [toUnits(hostGroups), ...middle, toUnits(destGroups)])
+
+  const reorder = (groups: Group[], units: Unit[]) =>
+    units.map((unit) => {
+      const group = groups.find((g) => g.label === unit.key) as Group
+      group.members = unit.members
+      return group
+    })
+
+  return {
+    middle: ordered.slice(1, -1).map((units) => units.flatMap((unit) => unit.members)),
+    waypoints,
+    chains,
+    hostGroups: reorder(hostGroups, ordered[0]),
+    destGroups: reorder(destGroups, ordered[ordered.length - 1]),
+    groupOf,
+  }
 }
 
 type Item =
@@ -239,8 +326,6 @@ function columnItems(groups: Group[], expanded: Set<string>, memberHeight: numbe
     return [{ kind: "header", id: `${group.id}:header`, group, height: HEADER_H }, ...members]
   })
 }
-
-const handlerHeight = (node: HandlerNode) => 36 + Math.ceil(Math.max(node.chips.length, 1) / 2) * 24
 
 const usedHeight = (heights: number[]) => heights.reduce((sum, h) => sum + h, 0) + MIN_GAP * (heights.length + 1)
 
@@ -367,6 +452,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
   const touches = (path: Path, id: string) =>
     path.host === id ||
     path.handler === id ||
+    path.steps.includes(id) ||
     path.dest === id ||
     base.groupOf.get(path.host)?.id === id ||
     base.groupOf.get(path.dest)?.id === id
@@ -413,13 +499,13 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
     const perHost = new Map<string, number>()
     for (const path of raw.paths) perHost.set(path.host, (perHost.get(path.host) ?? 0) + 1)
     const weight = (path: Path) => (byTraffic ? (hostStats.get(path.host)?.requests ?? 0) / (perHost.get(path.host) ?? 1) : 1)
-    const handlers = new Map<string, number>()
+    const steps = new Map<string, number>()
     const dests = new Map<string, number>()
     for (const path of shownPaths) {
-      handlers.set(path.handler, (handlers.get(path.handler) ?? 0) + weight(path))
+      for (const id of path.steps) steps.set(id, (steps.get(id) ?? 0) + weight(path))
       dests.set(path.dest, (dests.get(path.dest) ?? 0) + weight(path))
     }
-    return { weight, handlers, dests }
+    return { weight, steps, dests }
   }, [raw, shownPaths, hostStats, byTraffic])
 
   // A group box stands in for its members while it is collapsed.
@@ -428,55 +514,91 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
     return group && group.members.length > 1 && !expanded.has(group.id) ? group.id : id
   }
 
+  /** The nodes a path visits while groups are collapsed: boxes, and waypoints that carry a line past a column. */
+  const waypointId = (wp: Waypoint) => `wp:${resolve(wp.from)}>${resolve(wp.to)}@${wp.col}`
+  const resolveChain = (chain: string[]) =>
+    chain.map((id) => {
+      const wp = view.waypoints.get(id)
+      return wp ? waypointId(wp) : resolve(id)
+    })
+
   const layout = useMemo(() => {
+    const steps = view.middle.length
+    const last = steps + 1
     const hostItems = columnItems(view.hostGroups, expanded, HOST_H)
     const destItems = columnItems(view.destGroups, expanded, DEST_H)
-    const handlerHeights = view.handlers.map(handlerHeight)
-    const hostHeights = hostItems.map((item) => item.height)
-    const destHeights = destItems.map((item) => item.height)
-    const total = Math.max(usedHeight(hostHeights), usedHeight(handlerHeights), usedHeight(destHeights), 240)
 
-    const inner = Math.max(width - PAD * 2, MIN_INNER)
-    const gap = clamp(inner * 0.13, 80, 200)
-    const col = (inner - gap * 2) / 3
-    const colX = [PAD, PAD + col + gap, PAD + (col + gap) * 2]
+    const mean = (ranks: number[]) => ranks.reduce((sum, r) => sum + r, 0) / ranks.length
+    const middle = view.middle.map((ids) => {
+      const found = new Map<string, { id: string; wp: boolean; height: number; ranks: number[] }>()
+      ids.forEach((id, rank) => {
+        const wp = view.waypoints.get(id)
+        const key = wp ? waypointId(wp) : id
+        const item = found.get(key) ?? { id: key, wp: wp !== undefined, height: wp ? WP_H : STEP_H, ranks: [] }
+        item.ranks.push(rank)
+        found.set(key, item)
+      })
+      return [...found.values()].sort((a, b) => mean(a.ranks) - mean(b.ranks))
+    })
 
-    const hostTops = stack(hostHeights, total)
-    const handlerTops = stack(handlerHeights, total)
-    const destTops = stack(destHeights, total)
+    const heights = [hostItems.map((i) => i.height), ...middle.map((items) => items.map((i) => i.height)), destItems.map((i) => i.height)]
+    const total = Math.max(...heights.map(usedHeight), 240)
 
+    const minInner = SIDE_W * 2 + STEP_W * steps + MIN_COL_GAP * last
+    const inner = Math.max(width - PAD * 2, minInner)
+    const gap = clamp((inner - SIDE_W * 2 - STEP_W * steps) / last, MIN_COL_GAP, 160)
+    const side = Math.max(SIDE_W, (inner - gap * last - STEP_W * steps) / 2)
+    const widths = [side, ...Array.from({ length: steps }, () => STEP_W), side]
+    const colX: number[] = []
+    let x = PAD
+    for (const w of widths) {
+      colX.push(x)
+      x += w + gap
+    }
+
+    const tops = heights.map((column) => stack(column, total))
     const y = new Map<string, number>()
-    hostItems.forEach((item, i) => y.set(item.id, hostTops[i] + item.height / 2))
-    destItems.forEach((item, i) => y.set(item.id, destTops[i] + item.height / 2))
-    view.handlers.forEach((node, i) => y.set(node.id, handlerTops[i] + handlerHeights[i] / 2))
+    const col = new Map<string, number>()
+    hostItems.forEach((item, i) => (y.set(item.id, tops[0][i] + item.height / 2), col.set(item.id, 0)))
+    middle.forEach((items, k) =>
+      items.forEach((item, i) => (y.set(item.id, tops[k + 1][i] + item.height / 2), col.set(item.id, k + 1))),
+    )
+    destItems.forEach((item, i) => (y.set(item.id, tops[last][i] + item.height / 2), col.set(item.id, last)))
+
+    // A waypoint is a point in the middle of its column; a box has an edge on either side.
+    const leftOf = (id: string) => colX[col.get(id) ?? 0] + (id.startsWith("wp:") ? widths[col.get(id) ?? 0] / 2 : 0)
+    const rightOf = (id: string) => colX[col.get(id) ?? 0] + widths[col.get(id) ?? 0] / (id.startsWith("wp:") ? 2 : 1)
 
     const edgeMap = new Map<string, Edge>()
-    const add = (from: string, to: string, fromCol: number, weight: number) => {
-      const key = `${from}>${to}`
-      const existing = edgeMap.get(key)
-      if (existing) {
-        existing.count += weight
-        return
-      }
-      const d = curve(colX[fromCol] + col, y.get(from) ?? 0, colX[fromCol + 1], y.get(to) ?? 0)
-      edgeMap.set(key, { key, from, to, count: weight, d })
-    }
     for (const path of shownPaths) {
       const weight = flow.weight(path)
-      add(resolve(path.host), path.handler, 0, weight)
-      add(path.handler, resolve(path.dest), 1, weight)
+      const chain = resolveChain(view.chains.get(path) ?? [])
+      for (let i = 1; i < chain.length; i++) {
+        const from = chain[i - 1]
+        const to = chain[i]
+        const key = `${from}>${to}`
+        const existing = edgeMap.get(key)
+        if (existing) {
+          existing.count += weight
+          continue
+        }
+        const d = curve(rightOf(from), y.get(from) ?? 0, leftOf(to), y.get(to) ?? 0)
+        edgeMap.set(key, { key, from, to, count: weight, d })
+      }
     }
 
     return {
       total,
-      col,
+      last,
+      minWidth: minInner + PAD * 2,
       colX,
+      widths,
       hostItems,
       destItems,
-      hostTops,
-      destTops,
-      handlerTops,
-      handlerHeights,
+      middle,
+      hostTops: tops[0],
+      midTops: tops.slice(1, -1),
+      destTops: tops[last],
       edges: [...edgeMap.values()],
       maxWeight: Math.max(...[...edgeMap.values()].map((edge) => edge.count), 1),
     }
@@ -489,8 +611,9 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
     const nodes = new Set<string>()
     const edges = new Set<string>()
     for (const path of shownPaths.filter((p) => touches(p, focus))) {
-      nodes.add(path.host).add(path.handler).add(path.dest)
-      edges.add(`${resolve(path.host)}>${path.handler}`).add(`${path.handler}>${resolve(path.dest)}`)
+      for (const id of [path.host, ...path.steps, path.dest]) nodes.add(id)
+      const chain = resolveChain(view.chains.get(path) ?? [])
+      for (let i = 1; i < chain.length; i++) edges.add(`${chain[i - 1]}>${chain[i]}`)
     }
     return { nodes, edges }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -529,6 +652,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
     const group = [...base.hostGroups, ...base.destGroups].find((g) => g.id === id)
     if (group) return group.label
     if (id.startsWith("host:")) return hostLabel(raw.hosts.get(id)?.site.hosts[0] ?? id)
+    if (id.startsWith("mw:")) return raw.steps.get(id)?.chip.label ?? id
     if (id.startsWith("handler:")) return raw.handlers.get(id)?.chips.map((c) => c.label).join(" + ") || "No middleware"
     return id.replace(/^[a-z]+:/, "")
   }
@@ -664,13 +788,13 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
       <div className="flex min-h-0 flex-1">
       <ScrollArea className="min-h-0 min-w-0 flex-1">
         <div ref={containerRef} className="w-full" onClick={() => setPinned(null)}>
-          <div className="relative p-4" style={{ minWidth: MIN_INNER + PAD * 2 }}>
+          <div className="relative p-4" style={{ minWidth: layout.minWidth }}>
             <div className="relative" style={{ height: layout.total + 32 }}>
-              {["Incoming", "Handled by", "Routed to"].map((title, i) => (
+              {["Incoming", ...layout.middle.map((_, i) => (layout.middle.length === 1 ? "Middleware" : `Step ${i + 1}`)), "Routed to"].map((title, i) => (
                 <div
                   key={title}
                   className="absolute top-0 text-xs font-medium tracking-wide text-muted-foreground uppercase"
-                  style={{ left: cols[i] - PAD, width: layout.col }}
+                  style={{ left: cols[i] - PAD, width: layout.widths[i] }}
                 >
                   {title}
                 </div>
@@ -707,7 +831,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
                 </svg>
 
                 {layout.hostItems.map((item, i) => {
-                  const style = { left: cols[0] - PAD, width: layout.col, top: layout.hostTops[i], height: item.height }
+                  const style = { left: cols[0] - PAD, width: layout.widths[0], top: layout.hostTops[i], height: item.height }
                   if (item.kind === "header") {
                     return (
                       <button
@@ -815,39 +939,35 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
                   )
                 })}
 
-                {view.handlers.map((node, i) => (
-                  <div
-                    key={node.id}
-                    {...nodeProps(node.id)}
-                    className={cn(
-                      base_ring,
-                      "flex cursor-pointer flex-col justify-center gap-1.5 bg-secondary/50 px-3",
-                      focus === node.id && "border-primary",
-                      dimmed([node.id]) && "opacity-30",
-                    )}
-                    style={{ left: cols[1] - PAD, width: layout.col, top: layout.handlerTops[i], height: layout.handlerHeights[i] }}
-                  >
-                    {byTraffic && (
-                      <span className="absolute top-1.5 right-2 text-xs text-muted-foreground">
-                        {fmtCount(flow.handlers.get(node.id) ?? 0)} req
-                      </span>
-                    )}
-                    {node.chips.length === 0 ? (
-                      <span className="text-xs text-muted-foreground">No middleware</span>
-                    ) : (
-                      <div className="flex flex-wrap gap-1">
-                        {node.chips.map((chip) => (
-                          <Badge key={`${chip.label}|${chip.detail ?? ""}`} variant="outline" className="bg-card">
-                            {chip.label}
-                          </Badge>
-                        ))}
+                {layout.middle.map((items, k) =>
+                  items.map((item, i) => {
+                    if (item.wp) return null
+                    const chip = raw.steps.get(item.id)?.chip
+                    return (
+                      <div
+                        key={item.id}
+                        {...nodeProps(item.id)}
+                        className={cn(
+                          base_ring,
+                          "flex cursor-pointer items-center justify-between gap-2 bg-secondary/50 px-2",
+                          focus === item.id && "border-primary",
+                          dimmed([item.id]) && "opacity-30",
+                        )}
+                        style={{ left: cols[k + 1] - PAD, width: layout.widths[k + 1], top: layout.midTops[k][i], height: item.height }}
+                      >
+                        <span className="line-clamp-2 min-w-0 text-xs leading-snug font-medium" title={chip?.detail ?? chip?.label}>
+                          {chip?.label ?? item.id}
+                        </span>
+                        {byTraffic && (
+                          <span className="shrink-0 text-xs text-muted-foreground">{fmtCount(flow.steps.get(item.id) ?? 0)}</span>
+                        )}
                       </div>
-                    )}
-                  </div>
-                ))}
+                    )
+                  }),
+                )}
 
                 {layout.destItems.map((item, i) => {
-                  const style = { left: cols[2] - PAD, width: layout.col, top: layout.destTops[i], height: item.height }
+                  const style = { left: cols[layout.last] - PAD, width: layout.widths[layout.last], top: layout.destTops[i], height: item.height }
                   if (item.kind === "header") {
                     return (
                       <button

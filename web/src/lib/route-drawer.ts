@@ -8,7 +8,7 @@ export const DRAWER_STORAGE_KEY = "fairway:route-drawer-width"
 export function nodeKind(id: string): NodeKind {
   if (id.startsWith("host-group:") || id.startsWith("dest-group:")) return "group"
   if (id.startsWith("host:")) return "host"
-  if (id.startsWith("handler:")) return "rule"
+  if (id.startsWith("handler:") || id.startsWith("mw:")) return "rule"
   return "destination"
 }
 
