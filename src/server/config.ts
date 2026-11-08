@@ -11,6 +11,8 @@ export interface Config {
   maxRevisions: number;
   /** When set, only this Tailscale login may use the editor. */
   requireTailscaleLogin: string | null;
+  /** Caddy's TLS address (`host[:port]`) for probing Certificates; null disables probing. */
+  tlsProbeAddr: string | null;
   webRoot: string;
 }
 
@@ -26,6 +28,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     logFile: env.LOG_FILE ?? "access.log",
     maxRevisions: Number(env.MAX_REVISIONS ?? 50),
     requireTailscaleLogin: env.REQUIRE_TAILSCALE_LOGIN || null,
+    tlsProbeAddr: env.TLS_PROBE_ADDR?.trim() || null,
     webRoot: env.WEB_ROOT ?? "dist/web",
   };
 }

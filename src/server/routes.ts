@@ -253,7 +253,7 @@ function summarizeRoute(route: Route, listen: string[]): Site {
 }
 
 /** Caddy's own HTTP to HTTPS redirect server is noise in an overview. */
-function isAutoRedirect(server: Server): boolean {
+export function isAutoRedirect(server: Server): boolean {
   const routes = server.routes ?? [];
   return (
     routes.length > 0 &&

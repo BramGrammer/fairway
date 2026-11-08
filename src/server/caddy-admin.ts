@@ -1,4 +1,5 @@
 import { request } from "node:http";
+import { parseUpstreams, type UpstreamStatus } from "./upstreams.js";
 
 export interface Warning {
   file?: string;
@@ -9,6 +10,8 @@ export interface Warning {
 export type AdaptResult = { ok: true; warnings: Warning[] } | { ok: false; error: string };
 export type LoadResult = { ok: true } | { ok: false; error: string };
 export type ServersResult = { ok: true; servers: Record<string, unknown> } | { ok: false; error: string };
+
+export type UpstreamsResult = { ok: true; upstreams: Record<string, UpstreamStatus> } | { ok: false; error: string };
 
 interface Reply {
   status: number;
@@ -95,6 +98,28 @@ export class CaddyAdmin {
       return { ok: true, servers: (JSON.parse(reply.body) as Record<string, unknown> | null) ?? {} };
     } catch (error) {
       return { ok: false, error: `Cannot reach Caddy: ${(error as Error).message}` };
+    }
+  }
+
+  /** The running config's `tls` app: automation policies and manually loaded certificates. */
+  async liveTls(): Promise<{ ok: true; tls: Record<string, unknown> } | { ok: false; error: string }> {
+    try {
+      const reply = await this.send("GET", "/config/apps/tls");
+      if (reply.status !== 200) return { ok: false, error: errorMessage(reply) };
+      return { ok: true, tls: (JSON.parse(reply.body) as Record<string, unknown> | null) ?? {} };
+    } catch (error) {
+      return { ok: false, error: `Cannot reach Caddy: ${(error as Error).message}` };
+    }
+  }
+
+  /** Live failure and request counts of the reverse proxy upstreams Caddy knows. */
+  async upstreams(): Promise<UpstreamsResult> {
+    try {
+      const reply = await this.send("GET", "/reverse_proxy/upstreams");
+      if (reply.status !== 200) return { ok: false, error: errorMessage(reply) };
+      return { ok: true, upstreams: parseUpstreams(reply.body) };
+    } catch (error) {
+      return { ok: false, error: `Cannot read upstreams from Caddy: ${(error as Error).message}` };
     }
   }
 

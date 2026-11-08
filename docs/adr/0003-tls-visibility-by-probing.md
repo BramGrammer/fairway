@@ -20,3 +20,11 @@ Caddy's admin API reports configuration but not certificates: no expiry, no rene
 
 - **Reading the certificate store (filesystem or S3).** Gives the exact issuer directory, but needs credentials or a mount and relies on an unofficial layout.
 - **Caddy's events app.** Push-only, no history to query.
+
+## Issuance errors from the log
+
+Fairway scans the tail of the log it already reads for lines whose logger starts with `tls.` (`tls.obtain`, `tls.renew`, `tls.issuance.acme`), at level `error`, with the host in `identifier`. The newest one per host is shown with its age, and a later "certificate obtained/renewed successfully" line for the host clears it.
+
+- This works only when Caddy's default logger writes to the tailed file, as in a global `log { output file ... }` block. With per-site named loggers or the default stderr output, the runtime lines are not in the file and the tab shows nothing. That is indistinguishable from "no errors", so the absence of an error is not proof of a healthy Certificate.
+- Only the last 5000 lines are searched, so an error older than that is not found.
+- Status: the line shape comes from Caddy's documented JSON logging and certmagic's log calls. It has not been verified against a real log; the tests use synthetic lines. Verify against a real failed issuance before relying on it.

@@ -75,6 +75,16 @@ Versions, the changelog and the image are produced by [release-please](https://g
 
 CI (typecheck, lint, tests) runs on every push and pull request. The release pull request itself is made with the built-in token, so GitHub does not run CI on it; it only changes version files and the changelog. The repository setting "Allow GitHub Actions to create and approve pull requests" must be on.
 
+## TLS probing
+
+Caddy's admin API reports configuration, not certificates. When `TLS_PROBE_ADDR` is set, opening a host's TLS tab makes a TLS handshake to that address with the host's name and shows the Certificate actually served: issuer, expiry and the names it covers. Results are cached for 10 minutes; the Re-check button probes again.
+
+- Amber: under 21 days left (Caddy renews about 30 days out, so a renewal is likely failing), or a Certificate for a different name (Caddy's fallback Certificate).
+- Red: expired, under 7 days left, or the handshake failed.
+- On-demand hosts, HTTP-only hosts and hosts covered only by a wildcard are never probed. A handshake can trigger issuance.
+
+The address must reach Caddy directly, for example its LAN address. Probing the public name of a host behind a CDN proxy returns the proxy's Certificate, not Caddy's. Without the variable the tab shows what the config says and how to enable probing. See [ADR 0003](docs/adr/0003-tls-visibility-by-probing.md).
+
 ## Configuration
 
 | Variable | Default | |
@@ -82,6 +92,7 @@ CI (typecheck, lint, tests) runs on every push and pull request. The release pul
 | `ADMIN_SOCKET` | `/run/caddy-admin/admin.sock` | Caddy admin API socket |
 | `CADDYFILE_PATH` | `/caddyfile/Caddyfile` | The mounted Caddyfile |
 | `DATA_DIR` | `/data` | Original and Revisions |
-| `LOG_DIR`, `LOG_FILE` | `/var/log/caddy`, `access.log` | Where Caddy writes its JSON log |
+| `LOG_DIR`, `LOG_FILE` | `/var/log/caddy`, `access.log` | Where Caddy writes its JSON log. The TLS tab's last issuance error needs Caddy's default logger (not only access logs) to write here. |
 | `MAX_REVISIONS` | `50` | Deployed Revisions kept |
+| `TLS_PROBE_ADDR` | unset | Caddy's HTTPS address as the editor reaches it, `host` or `host:port` (port defaults to 443), e.g. `192.0.2.10:443`. Turns on Certificate probing in the TLS tab, see below |
 | `REQUIRE_TAILSCALE_LOGIN` | unset | Only this `Tailscale-User-Login` may use the editor |

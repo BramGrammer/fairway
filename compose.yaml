@@ -10,6 +10,8 @@ x-editor: &editor
     CADDYFILE_PATH: /caddyfile/Caddyfile
     LOG_DIR: /var/log/caddy
     DATA_DIR: /data
+    # Where to reach Caddy's HTTPS port from this container, to show served Certificates (see README).
+    TLS_PROBE_ADDR: ${TLS_PROBE_ADDR:-}
   volumes:
     - ${CADDY_STACK_DIR}/caddy/CaddyFile:/caddyfile/Caddyfile
     - ${CADDY_STACK_DIR}/caddy/admin:/run/caddy-admin
