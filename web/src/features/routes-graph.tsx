@@ -18,10 +18,10 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Toggle } from "@/components/ui/toggle"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { GraphCanvas, type CanvasHandle } from "@/features/graph-canvas"
 import { RouteDrawer } from "@/features/route-drawer"
 import { TlsTab } from "@/features/tls-tab"
 import { TrafficTab } from "@/features/traffic-tab"
@@ -50,11 +50,11 @@ const DEST_ICONS = {
 } as const
 
 const PAD = 16
-const SIDE_W = 190
-const STEP_W = 150
+const SIDE_W = 210
+const STEP_W = 160
 const STEP_H = 44
 const WP_H = 4
-const MIN_COL_GAP = 36
+const COL_GAP = 64
 const HOST_H = 44
 const GROUP_H = 64
 const HEADER_H = 28
@@ -467,14 +467,8 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
   }
 
   const containerRef = useRef<HTMLDivElement>(null)
-  const [width, setWidth] = useState(1100)
-  useEffect(() => {
-    const el = containerRef.current
-    if (!el) return
-    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width))
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
+  const areaRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<CanvasHandle>(null)
 
   const focus = hovered ?? pinned
   const touches = (path: Path, id: string) =>
@@ -572,16 +566,13 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
     const heights = [hostItems.map((i) => i.height), ...middle.map((items) => items.map((i) => i.height)), destItems.map((i) => i.height)]
     const total = Math.max(...heights.map(usedHeight), 240)
 
-    const minInner = SIDE_W * 2 + STEP_W * steps + MIN_COL_GAP * last
-    const inner = Math.max(width - PAD * 2, minInner)
-    const gap = clamp((inner - SIDE_W * 2 - STEP_W * steps) / last, MIN_COL_GAP, 160)
-    const side = Math.max(SIDE_W, (inner - gap * last - STEP_W * steps) / 2)
-    const widths = [side, ...Array.from({ length: steps }, () => STEP_W), side]
+    // The canvas has a fixed size; zooming and panning fit it to the screen.
+    const widths = [SIDE_W, ...Array.from({ length: steps }, () => STEP_W), SIDE_W]
     const colX: number[] = []
     let x = PAD
     for (const w of widths) {
       colX.push(x)
-      x += w + gap
+      x += w + COL_GAP
     }
 
     const tops = heights.map((column) => stack(column, total))
@@ -688,7 +679,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
     return {
       total,
       last,
-      minWidth: minInner + PAD * 2,
+      width: colX[last] + widths[last] + PAD,
       colX,
       widths,
       hostItems,
@@ -701,7 +692,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
       maxWeight: Math.max(...[...edgeMap.values()].map((edge) => edge.count), 1),
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, expanded, shownPaths, width, flow])
+  }, [view, expanded, shownPaths, flow])
 
   const lineWidth = (edge: Edge) =>
     byTraffic ? 1.25 + 8 * Math.sqrt(edge.count / layout.maxWeight) : edgeWidth(edge.count)
@@ -771,13 +762,14 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
     setIsolate(false)
   }, [])
 
-  // The drawer shrinks the graph area, so bring the selected node back into view.
+  // The drawer covers the right of the canvas, so pan the selected node out from under it.
   useEffect(() => {
     if (!pinned) return
     const frame = requestAnimationFrame(() => {
       const nodes = containerRef.current?.querySelectorAll<HTMLElement>("[data-node-id]") ?? []
+      const drawer = areaRef.current?.querySelector<HTMLElement>("section[aria-label$='details']")
       for (const node of nodes) {
-        if (node.dataset.nodeId === pinned) node.scrollIntoView({ block: "nearest", inline: "nearest" })
+        if (node.dataset.nodeId === pinned) canvasRef.current?.reveal(node, drawer?.offsetWidth ?? 0)
       }
     })
     return () => cancelAnimationFrame(frame)
@@ -887,22 +879,17 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
         </Alert>
       )}
 
-      <div className="flex min-h-0 flex-1">
-      <ScrollArea className="min-h-0 min-w-0 flex-1">
-        <div ref={containerRef} className="w-full" onClick={() => setPinned(null)}>
-          <div className="relative p-4" style={{ minWidth: layout.minWidth }}>
-            <div className="relative" style={{ height: layout.total + 32 }}>
-              {["Incoming", ...layout.middle.map((_, i) => (layout.middle.length === 1 ? "Middleware" : `Step ${i + 1}`)), "Routed to"].map((title, i) => (
-                <div
-                  key={title}
-                  className="absolute top-0 text-xs font-medium tracking-wide text-muted-foreground uppercase"
-                  style={{ left: cols[i] - PAD, width: layout.widths[i] }}
-                >
-                  {title}
-                </div>
-              ))}
-
-              <div className="absolute inset-x-0 top-8" style={{ height: layout.total }}>
+      <div ref={areaRef} className="relative min-h-0 flex-1">
+        <GraphCanvas
+          ref={canvasRef}
+          width={layout.width}
+          height={layout.total + 32}
+          fitKey={query}
+          onBackgroundClick={() => setPinned(null)}
+        >
+          <div ref={containerRef} className="relative p-4" style={{ width: layout.width, height: layout.total + 32 }}>
+            <div className="relative" style={{ height: layout.total }}>
+              <div className="absolute inset-x-0 top-0" style={{ height: layout.total }}>
                 <svg className="absolute size-full overflow-visible" style={{ left: -PAD }} aria-hidden="true">
                   {layout.edges.map((edge) => {
                     const on = lit?.edges.has(edge.key)
@@ -1155,8 +1142,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
               </div>
             </div>
           </div>
-        </div>
-      </ScrollArea>
+        </GraphCanvas>
 
       {pinned && (
         <RouteDrawer

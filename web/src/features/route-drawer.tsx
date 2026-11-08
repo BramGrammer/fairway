@@ -33,7 +33,7 @@ interface RouteDrawerProps {
   overview?: ReactNode
 }
 
-/** Non-modal panel docked at the right of its parent; the parent is a flex row. */
+/** Non-modal panel laid over the right edge of its parent, which must be positioned. */
 export function RouteDrawer({ name, kind, overview, onClose }: RouteDrawerProps) {
   const ref = useRef<HTMLElement>(null)
   const [width, setWidth] = useState(readWidth)
@@ -76,7 +76,7 @@ export function RouteDrawer({ name, kind, overview, onClose }: RouteDrawerProps)
     <section
       ref={ref}
       aria-label={`${name} details`}
-      className="relative flex shrink-0 flex-col border-l bg-card shadow-[-8px_0_24px_-16px_rgb(0_0_0/0.25)]"
+      className="absolute inset-y-0 right-0 z-10 flex flex-col border-l bg-card shadow-[-8px_0_24px_-16px_rgb(0_0_0/0.25)]"
       style={{ width, maxWidth: "70%" }}
     >
       <div
