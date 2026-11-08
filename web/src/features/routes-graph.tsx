@@ -30,12 +30,15 @@ import { useMetrics } from "@/hooks/use-metrics"
 import { useUpstreamHealth } from "@/hooks/use-upstream-health"
 import { HealthDot } from "@/features/health-dot"
 import { TlsBadge } from "@/features/tls-badge"
+import { TlsLock } from "@/features/tls-lock"
+import { useTlsConfig } from "@/hooks/use-tls-config"
 import { useTlsStatus } from "@/hooks/use-tls-status"
 import { groupBadge, hostBadge } from "@/lib/tls-badges"
 import { upstreamHealth, worstHealth } from "@/lib/upstream-health"
 import type { Chip, Destination, HostStats, Site } from "@/lib/api"
 import { nodeKind } from "@/lib/route-drawer"
 import { PANEL_ROWS, PANEL_ROW_H, panelRows, splitMembers } from "@/lib/group-panel"
+import { securityOf } from "@/lib/tls-config"
 import { stepHeight } from "@/lib/middleware-node"
 import { orderLayers, type Layers, type Link, type Unit } from "@/lib/graph-order"
 import { estimateTraffic, mergeStats, trafficContributions } from "@/lib/traffic"
@@ -544,6 +547,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
   const destRowH = byTraffic ? 44 : PANEL_ROW_H
   const upstreams = useUpstreamHealth(true)
   const tlsStatus = useTlsStatus(true)
+  const tlsStates = useTlsConfig(true)
   const siteHosts = (id: string) => raw.hosts.get(id)?.site.hosts ?? []
   const destHealth = (id: string) => {
     const dest = raw.dests.get(id)?.dest
@@ -1096,6 +1100,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
                                 <span className="truncate text-xs font-medium">{hostLabel(node.site.hosts[0] ?? "*")}</span>
                                 {others > 0 && <span className="shrink-0 text-[10px] text-muted-foreground">+{others}</span>}
                                 <TlsBadge badge={hostBadge(node.site.hosts, tlsStatus)} />
+                                <TlsLock security={securityOf(node.site.hosts, tlsStates)} />
                               </div>
                               {live !== null && (
                                 <MetricLine
@@ -1188,6 +1193,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
                         <div className="flex items-center gap-1.5">
                           <span className="truncate text-sm font-medium">{hostLabel(primary)}</span>
                           <TlsBadge badge={hostBadge(node.site.hosts, tlsStatus)} />
+                          <TlsLock security={securityOf(node.site.hosts, tlsStates)} />
                         </div>
                         {(subtitle || sparkline(stats)) && <MetricLine text={subtitle} history={stats?.history} />}
                       </div>
