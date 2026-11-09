@@ -34,7 +34,7 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { Toggle } from "@/components/ui/toggle"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { api } from "@/lib/api"
+import { api, openStream } from "@/lib/api"
 import { PRESSED } from "@/lib/toggle-styles"
 import { cn } from "@/lib/utils"
 
@@ -129,7 +129,7 @@ export function LogsTab({ active }: { active: boolean }) {
     void api<{ lines: string[] }>("/api/logs?lines=500").then(({ body }) => {
       if (cancelled) return
       setEntries(parseAll(body.lines))
-      source = new EventSource("/api/logs/stream")
+      source = openStream("/api/logs/stream")
       source.onmessage = (event) => {
         const incoming = parseAll(JSON.parse(event.data) as string[])
         if (pausedRef.current) pending.current.push(...incoming)

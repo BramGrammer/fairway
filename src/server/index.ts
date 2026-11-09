@@ -6,5 +6,5 @@ const config = loadConfig();
 const app = await createApp(config);
 
 serve({ fetch: app.fetch, port: config.port, hostname: config.host }, ({ port }) => {
-  console.log(`fairway listening on :${port} (no authentication)`);
+  console.log(`fairway listening on :${port} (${config.authUser ? "login required" : "no authentication"})`);
 });

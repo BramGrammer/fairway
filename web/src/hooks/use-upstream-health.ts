@@ -12,7 +12,7 @@ export function useUpstreamHealth(active: boolean, intervalMs = 5000) {
     let stopped = false
     const poll = () => {
       if (document.visibilityState === "hidden") return
-      api<UpstreamsReply>("/api/upstreams")
+      api<UpstreamsReply>("/api/upstreams", undefined, { background: true })
         .then(({ body }) => {
           if (!stopped) setReply(body)
         })

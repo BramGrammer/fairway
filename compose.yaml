@@ -12,6 +12,11 @@ x-editor: &editor
     DATA_DIR: /data
     # Where to reach Caddy's HTTPS port from this container, to show served Certificates (see README).
     TLS_PROBE_ADDR: ${TLS_PROBE_ADDR:-}
+    # The Owner's login (see README). Leave AUTH_USER empty to run without a login.
+    AUTH_USER: ${AUTH_USER:-}
+    AUTH_PASSWORD: ${AUTH_PASSWORD:-}
+    AUTH_PASSWORD_HASH: ${AUTH_PASSWORD_HASH:-}
+    TRUST_PROXY: ${TRUST_PROXY:-}
   volumes:
     - ${CADDY_STACK_DIR}/caddy/CaddyFile:/caddyfile/Caddyfile
     - ${CADDY_STACK_DIR}/caddy/admin:/run/caddy-admin

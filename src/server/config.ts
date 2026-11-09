@@ -12,6 +12,12 @@ export interface Config {
   /** Caddy's TLS address (`host[:port]`) for probing Certificates; null disables probing. */
   tlsProbeAddr: string | null;
   webRoot: string;
+  /** The Owner's login. Neither set means Fairway runs open; a hash wins over a password. */
+  authUser: string | null;
+  authPassword: string | null;
+  authPasswordHash: string | null;
+  /** Comma separated proxy addresses or ranges whose forwarded headers are believed. */
+  trustProxy: string;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -27,5 +33,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     maxRevisions: Number(env.MAX_REVISIONS ?? 50),
     tlsProbeAddr: env.TLS_PROBE_ADDR?.trim() || null,
     webRoot: env.WEB_ROOT ?? "dist/web",
+    authUser: env.AUTH_USER || null,
+    authPassword: env.AUTH_PASSWORD || null,
+    authPasswordHash: env.AUTH_PASSWORD_HASH || null,
+    trustProxy: env.TRUST_PROXY ?? "",
   };
 }

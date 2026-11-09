@@ -2,6 +2,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { join } from "node:path";
+import { createAuth, parseTrustProxy } from "./auth.js";
 import { CaddyAdmin } from "./caddy-admin.js";
 import type { Config } from "./config.js";
 import { DeployError, Deployer } from "./deploy.js";
@@ -29,13 +30,26 @@ export async function createApp(config: Config) {
   const deployer = new Deployer(config.caddyfilePath, admin, store);
   await deployer.ensureOriginal();
 
+  const auth = await createAuth({
+    user: config.authUser ?? undefined,
+    password: config.authPassword ?? undefined,
+    passwordHash: config.authPasswordHash ?? undefined,
+    dataDir: config.dataDir,
+    trustProxy: parseTrustProxy(config.trustProxy),
+  });
+  if (!auth.enabled) console.warn("fairway: no login configured (AUTH_USER and AUTH_PASSWORD), anyone who can reach this page can change your proxy");
+
   const app = new Hono();
   const logPath = join(config.logDir, config.logFile);
+
+  // The login routes stay open; everything else under /api needs a Session once login is on.
+  app.route("/api/auth", auth.routes);
+  app.use("/api/*", auth.guard);
 
   app.get("/api/status", async (c) =>
     c.json({
       caddyReachable: await admin.ping(),
-      auth: { mode: "none" },
+      auth: auth.enabled ? { mode: "login" } : { mode: "none" },
     }),
   );
 

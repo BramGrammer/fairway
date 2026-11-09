@@ -23,7 +23,7 @@ The dev Caddy is built from `dev/caddy/Dockerfile`, the same plugin build as pro
 
 Validate, Format and Routes only read your Caddyfile (`/adapt` never applies it), so they are safe with a real one. Do not **Deploy** a production Caddyfile in dev: it would try to load real domains, certificates and storage.
 
-Fairway: http://127.0.0.1:3000. The dev Caddy serves http://127.0.0.1:8080 and :8081. Change the response text in the editor, deploy, and watch `:8080` change with no restart. `npm run dev:down` stops it, `npm run dev:reset` also wipes its state.
+Fairway: http://127.0.0.1:3000, signed in with the throwaway login `dev` / `dev` from `dev/compose.yaml` (delete the two `AUTH_*` lines there to see the open mode). The dev Caddy serves http://127.0.0.1:8080 and :8081. Change the response text in the editor, deploy, and watch `:8080` change with no restart. `npm run dev:down` stops it, `npm run dev:reset` also wipes its state.
 
 The sample Caddyfile (`dev/Caddyfile.sample`) writes three logs into `dev/run/logs`, which Fairway reads: `access-public.log` (hosts on :8080, with `api_key` and `token` query values redacted), `access-int.log` (hosts on :8081, no redaction) and the default `access.log` (runtime messages plus hosts without their own named log). `dev:up` only copies the sample to `dev/run/Caddyfile` when that file does not exist, so after the sample changes run `npm run dev:reset` (or delete `dev/run/Caddyfile`) to pick it up. Send test requests with a Host header:
 
@@ -65,7 +65,7 @@ Then in Dockge create a stack named `fairway` and put these in its folder:
 
 | Profile (`COMPOSE_PROFILES`) | What you get |
 | --- | --- |
-| `local` (default) | Fairway on `127.0.0.1:3000` of the NAS. Test through `ssh -L 3000:127.0.0.1:3000 your-nas`. No authentication. |
+| `local` (default) | Fairway on `127.0.0.1:3000` of the NAS. Test through `ssh -L 3000:127.0.0.1:3000 your-nas`. Set `AUTH_USER` and a password to require a login, see [Login](#login). |
 
 **Updating:** pull the new image and redeploy. In Dockge press **Update** on the stack (or `docker compose pull`, then Deploy). Set `FAIRWAY_TAG` to a version such as `0.2.0` to pin one instead of `latest`.
 
@@ -91,6 +91,15 @@ Caddy's admin API reports configuration, not certificates. When `TLS_PROBE_ADDR`
 
 The address must reach Caddy directly, for example its LAN address. Probing the public name of a host behind a CDN proxy returns the proxy's Certificate, not Caddy's. Without the variable the tab shows what the config says and how to enable probing. See [ADR 0003](docs/adr/0003-tls-visibility-by-probing.md).
 
+## Login
+
+Fairway has one **Owner**. Set `AUTH_USER` and either `AUTH_PASSWORD` or `AUTH_PASSWORD_HASH` in `.env` and every page and API route asks for that login (only the sign-in page itself is public). Sessions last 12 hours since the last activity and at most 7 days; changing the password or hash signs everyone out. Failed sign-ins are answered more and more slowly (up to 5 seconds) but never lock you out.
+
+- With neither set, Fairway runs open, logs a warning and shows a red "No authentication" notice. Fairway is meant for an internal network, so restrict who can reach it there.
+- Setting only one of the username and the password is a startup error.
+- A hash keeps the password out of `.env`. Make one with `node -e "import('./dist/server/auth.js').then(async m => console.log(await m.hashPassword(process.argv[1])))" 'your password'` inside the container. The hash contains `$` characters, so single-quote it (or double each `$`) in `.env` and in a Compose file. If both are set, the hash wins.
+- Behind Caddy, set `TRUST_PROXY` to Caddy's address (or range). Fairway then reads the visitor's address from `X-Forwarded-For`, and treats the connection as HTTPS when Caddy says so (which marks the session cookie Secure). Without it those headers are ignored, so a client cannot fake its address. Caddy's `reverse_proxy` already replaces these headers from clients it does not trust.
+
 ## Configuration
 
 | Variable | Default | |
@@ -100,4 +109,7 @@ The address must reach Caddy directly, for example its LAN address. Probing the 
 | `DATA_DIR` | `/data` | Original and Revisions |
 | `LOG_DIR`, `LOG_FILE` | `/var/log/caddy`, `access.log` | Where Caddy writes its JSON log. The TLS tab's last issuance error needs Caddy's default logger (not only access logs) to write here. |
 | `MAX_REVISIONS` | `50` | Deployed Revisions kept |
+| `AUTH_USER`, `AUTH_PASSWORD` | unset | The Owner's login, see [Login](#login). Both, or neither |
+| `AUTH_PASSWORD_HASH` | unset | A scrypt hash instead of `AUTH_PASSWORD`; wins when both are set |
+| `TRUST_PROXY` | unset | Comma separated proxy addresses or CIDR ranges whose `X-Forwarded-*` headers are believed |
 | `TLS_PROBE_ADDR` | unset | Caddy's HTTPS address as the editor reaches it, `host` or `host:port` (port defaults to 443), e.g. `192.0.2.10:443`. Turns on Certificate probing in the TLS tab, see below |

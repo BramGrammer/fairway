@@ -11,7 +11,7 @@ export function useMetrics(active: boolean, windowSeconds: number, intervalMs = 
     let stopped = false
     const poll = () => {
       if (document.visibilityState === "hidden") return
-      api<MetricsReply>(`/api/metrics?window=${windowSeconds}`)
+      api<MetricsReply>(`/api/metrics?window=${windowSeconds}`, undefined, { background: true })
         .then(({ body }) => {
           if (!stopped) setMetrics(body)
         })
