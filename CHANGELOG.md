@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0](https://github.com/BramGrammer/fairway/compare/v0.2.1...v0.3.0) (2026-11-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **auth:** REQUIRE_TAILSCALE_LOGIN and the tailscale compose profile (TS_AUTHKEY, TS_ALLOWED_LOGIN) are removed. Deployments that used the profile must publish the editor through the local profile and restrict access another way.
+
+### Features
+
+* **auth:** add the owner login ([c90e37d](https://github.com/BramGrammer/fairway/commit/c90e37d2b772f26c55bc556727d21e3eee1f52c5))
+* **auth:** add the owner login and remove the Tailscale gate ([1921335](https://github.com/BramGrammer/fairway/commit/19213351ef540edead3f570551245a9c76254a12))
+* **auth:** remove the Tailscale gate and profile ([ae9a1ef](https://github.com/BramGrammer/fairway/commit/ae9a1efd4ec96e89f0145c544b349af82ec7a639))
+* **routes:** show a host's access log in its drawer ([465c33d](https://github.com/BramGrammer/fairway/commit/465c33d39164c78ca1a460756115c07c0ca6e522))
+* **routes:** show a host's access log in its drawer ([f897dcc](https://github.com/BramGrammer/fairway/commit/f897dccb9fbfbc0f1340722f1878a7f7fd2aeaf2))
+
 ## [0.2.1](https://github.com/BramGrammer/fairway/compare/v0.2.0...v0.2.1) (2026-11-09)
 
 
