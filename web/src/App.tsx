@@ -69,12 +69,10 @@ function initialView(): View {
 
 function useStatus() {
   const [status, setStatus] = useState<StatusInfo | null>(null)
-  const [denied, setDenied] = useState(false)
   useEffect(() => {
     async function refresh() {
       try {
         const reply = await api<StatusInfo>("/api/status")
-        setDenied(reply.status === 403)
         if (reply.status === 200) setStatus(reply.body)
       } catch {
         setStatus({ caddyReachable: false, auth: { mode: "none" } })
@@ -84,7 +82,7 @@ function useStatus() {
     const timer = setInterval(refresh, 15_000)
     return () => clearInterval(timer)
   }, [])
-  return { status, denied }
+  return { status }
 }
 
 function StatusBadges({ status }: { status: StatusInfo | null }) {
@@ -98,7 +96,7 @@ function StatusBadges({ status }: { status: StatusInfo | null }) {
             <span className="group-data-[collapsible=icon]:hidden">No authentication</span>
           </TooltipTrigger>
           <TooltipContent side="right">
-            No authentication. Anyone who can reach this page can change your proxy. Use the Tailscale profile to restrict it.
+            No authentication. Anyone who can reach this page can change your proxy. Fairway is meant for an internal network: restrict access at the network layer.
           </TooltipContent>
         </Tooltip>
       )}
@@ -141,29 +139,13 @@ export default function App() {
   const [view, setView] = useState<View>(initialView)
   const [topBarSlot, setTopBarSlot] = useState<HTMLElement | null>(null)
   const caddyfile = useCaddyfile()
-  const { status, denied } = useStatus()
+  const { status } = useStatus()
 
   useEffect(() => onShowInEditor(() => setView("editor")), [])
 
   useEffect(() => {
     window.history.replaceState(null, "", `#${view}`)
   }, [view])
-
-  if (denied) {
-    return (
-      <Empty className="h-svh">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <ShieldAlertIcon />
-          </EmptyMedia>
-          <EmptyTitle>Access denied</EmptyTitle>
-          <EmptyDescription>
-            This Tailscale user is not allowed to use Fairway.
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    )
-  }
 
   const current = NAV.find((item) => item.id === view)!
 

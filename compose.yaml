@@ -1,4 +1,4 @@
-# One of two profiles runs: "local" (default, see .env.example) or "tailscale".
+# The "local" profile runs by default, see .env.example.
 
 x-editor: &editor
   image: ghcr.io/bramgrammer/fairway:${FAIRWAY_TAG:-latest}
@@ -25,31 +25,3 @@ services:
     container_name: fairway
     ports:
       - "${EDITOR_BIND:-127.0.0.1}:${EDITOR_PORT:-3000}:3000"
-
-  tailscale:
-    image: tailscale/tailscale:stable
-    profiles: [tailscale]
-    container_name: fairway-tailscale
-    hostname: fairway
-    restart: unless-stopped
-    environment:
-      TS_AUTHKEY: ${TS_AUTHKEY:-}
-      TS_HOSTNAME: fairway
-      TS_EXTRA_ARGS: --advertise-tags=tag:fairway
-      TS_STATE_DIR: /var/lib/tailscale
-      TS_USERSPACE: "true"
-      TS_SERVE_CONFIG: /config/serve.json
-    volumes:
-      - ./tailscale/state:/var/lib/tailscale
-      - ./tailscale/serve.json:/config/serve.json:ro
-
-  editor-tailscale:
-    <<: *editor
-    profiles: [tailscale]
-    container_name: fairway-app
-    # Shares the sidecar's network, so there is no published port at all.
-    network_mode: service:tailscale
-    depends_on: [tailscale]
-    environment:
-      <<: *editor-env
-      REQUIRE_TAILSCALE_LOGIN: ${TS_ALLOWED_LOGIN:-}

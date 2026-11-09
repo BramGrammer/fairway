@@ -62,14 +62,10 @@ Then in Dockge create a stack named `fairway` and put these in its folder:
 
 - `compose.yaml` from this repo
 - `.env`, copied from `.env.example`, with `CADDY_STACK_DIR` set
-- `tailscale/serve.json`, only for the `tailscale` profile
 
 | Profile (`COMPOSE_PROFILES`) | What you get |
 | --- | --- |
 | `local` (default) | Fairway on `127.0.0.1:3000` of the NAS. Test through `ssh -L 3000:127.0.0.1:3000 your-nas`. No authentication. |
-| `tailscale` | Tailscale sidecar at `https://fairway.<tailnet>.ts.net`, no published port, only `TS_ALLOWED_LOGIN` is let in. Needs `TS_AUTHKEY` (tagged `tag:fairway`) and an ACL restricting that tag to your own devices. |
-
-Switching is a one-line change to `COMPOSE_PROFILES`, then Deploy.
 
 **Updating:** pull the new image and redeploy. In Dockge press **Update** on the stack (or `docker compose pull`, then Deploy). Set `FAIRWAY_TAG` to a version such as `0.2.0` to pin one instead of `latest`.
 
@@ -105,4 +101,3 @@ The address must reach Caddy directly, for example its LAN address. Probing the 
 | `LOG_DIR`, `LOG_FILE` | `/var/log/caddy`, `access.log` | Where Caddy writes its JSON log. The TLS tab's last issuance error needs Caddy's default logger (not only access logs) to write here. |
 | `MAX_REVISIONS` | `50` | Deployed Revisions kept |
 | `TLS_PROBE_ADDR` | unset | Caddy's HTTPS address as the editor reaches it, `host` or `host:port` (port defaults to 443), e.g. `192.0.2.10:443`. Turns on Certificate probing in the TLS tab, see below |
-| `REQUIRE_TAILSCALE_LOGIN` | unset | Only this `Tailscale-User-Login` may use the editor |

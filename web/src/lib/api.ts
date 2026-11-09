@@ -34,7 +34,7 @@ export interface RevisionMeta {
 
 export interface StatusInfo {
   caddyReachable: boolean
-  auth: { mode: "none" } | { mode: "tailscale"; user: string | null }
+  auth: { mode: "none" }
 }
 
 export type ValidateResult =

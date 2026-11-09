@@ -32,22 +32,10 @@ export async function createApp(config: Config) {
   const app = new Hono();
   const logPath = join(config.logDir, config.logFile);
 
-  app.use("/api/*", async (c, next) => {
-    if (config.requireTailscaleLogin) {
-      const login = c.req.header("Tailscale-User-Login");
-      if (login !== config.requireTailscaleLogin) {
-        return c.json({ error: "This Tailscale user is not allowed to use the editor." }, 403);
-      }
-    }
-    await next();
-  });
-
   app.get("/api/status", async (c) =>
     c.json({
       caddyReachable: await admin.ping(),
-      auth: config.requireTailscaleLogin
-        ? { mode: "tailscale", user: c.req.header("Tailscale-User-Login") ?? null }
-        : { mode: "none" },
+      auth: { mode: "none" },
     }),
   );
 
