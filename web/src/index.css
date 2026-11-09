@@ -243,7 +243,8 @@
 }
 
 .dark {
-  --canvas: var(--page);
+  /* Between the sidebar (--page) and the nodes (--card), so the canvas reads as its own surface. */
+  --canvas: var(--background);
   --node: var(--card);
 }
 

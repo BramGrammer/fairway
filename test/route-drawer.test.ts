@@ -3,7 +3,9 @@ import { describe, it } from "node:test";
 import {
   DEFAULT_DRAWER_WIDTH,
   MIN_DRAWER_WIDTH,
+  activeTab,
   clampDrawerWidth,
+  drawerTabs,
   nodeKind,
   parseStoredWidth,
 } from "../web/src/lib/route-drawer.js";
@@ -36,5 +38,19 @@ describe("parseStoredWidth", () => {
     assert.equal(parseStoredWidth(null), DEFAULT_DRAWER_WIDTH);
     assert.equal(parseStoredWidth("abc"), DEFAULT_DRAWER_WIDTH);
     assert.equal(parseStoredWidth("-5"), DEFAULT_DRAWER_WIDTH);
+  });
+});
+
+describe("drawer tabs", () => {
+  it("offers Overview and Logs for hosts only", () => {
+    assert.deepEqual(drawerTabs("host"), ["overview", "logs"]);
+    assert.deepEqual(drawerTabs("group"), []);
+    assert.deepEqual(drawerTabs("rule"), []);
+    assert.deepEqual(drawerTabs("destination"), []);
+  });
+  it("keeps the selected tab when the node has it, else falls back to the overview", () => {
+    assert.equal(activeTab("host", "logs"), "logs");
+    assert.equal(activeTab("group", "logs"), "overview");
+    assert.equal(activeTab("rule", "logs"), "overview");
   });
 });

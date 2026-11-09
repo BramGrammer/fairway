@@ -112,6 +112,17 @@ export class CaddyAdmin {
     }
   }
 
+  /** The running config's `logging` section: named loggers and their writers. */
+  async liveLogging(): Promise<{ ok: true; logging: Record<string, unknown> } | { ok: false; error: string }> {
+    try {
+      const reply = await this.send("GET", "/config/logging");
+      if (reply.status !== 200) return { ok: false, error: errorMessage(reply) };
+      return { ok: true, logging: (JSON.parse(reply.body) as Record<string, unknown> | null) ?? {} };
+    } catch (error) {
+      return { ok: false, error: `Cannot reach Caddy: ${(error as Error).message}` };
+    }
+  }
+
   /** Live failure and request counts of the reverse proxy upstreams Caddy knows. */
   async upstreams(): Promise<UpstreamsResult> {
     try {

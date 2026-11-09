@@ -6,6 +6,7 @@ import { CaddyAdmin } from "./caddy-admin.js";
 import type { Config } from "./config.js";
 import { DeployError, Deployer } from "./deploy.js";
 import { formatCaddyfile } from "./format.js";
+import { parseHostLines, readHostLog, resolutionKey, resolveHostLogFile } from "./host-logs.js";
 import { LogFollower, tailLines } from "./logs.js";
 import { MetricsTracker, WINDOWS_MS } from "./metrics.js";
 import { summarizeRoutes } from "./routes.js";
@@ -14,6 +15,10 @@ import { lastIssuanceError } from "./issuance.js";
 import { summarizeTls } from "./tls.js";
 import { probeEligibility, TlsProber } from "./tls-probe.js";
 import { TlsSweep } from "./tls-sweep.js";
+
+/** How often a host log stream re-reads the config, and how often it sends a keep-alive. */
+const RESOLVE_CHECK_MS = 3_000;
+const PING_MS = 15_000;
 
 export async function createApp(config: Config) {
   const admin = new CaddyAdmin(config.adminSocket);
@@ -73,6 +78,68 @@ export async function createApp(config: Config) {
     const tls = await admin.liveTls();
     // Caddy answers 404-ish for a missing tls app; that just means no policies or manual certificates.
     return c.json({ ok: true, sites: summarizeTls(servers.servers, tls.ok ? tls.tls : {}) });
+  });
+
+  // The live config's HTTP servers and logging section, which together say where a host logs to.
+  const liveLogConfig = async () => {
+    const servers = await admin.liveServers();
+    if (!servers.ok) return { ok: false as const, error: servers.error };
+    const logging = await admin.liveLogging();
+    if (!logging.ok) return { ok: false as const, error: logging.error };
+    return { ok: true as const, servers: servers.servers, logging: logging.logging };
+  };
+
+  // Which file a host logs to is read from the running config on every request; nothing is cached.
+  app.get("/api/host-logs", async (c) => {
+    const host = c.req.query("host")?.trim();
+    if (!host) return c.json({ ok: false, error: "Missing host" }, 400);
+    const live = await liveLogConfig();
+    if (!live.ok) return c.json({ ok: false, error: live.error }, 502);
+    return c.json(await readHostLog({ logging: live.logging, servers: live.servers, logDir: config.logDir, host, limit: 200 }));
+  });
+
+  // Live tail of one host. Data events carry a JSON array of parsed lines for the host; the `end` event
+  // means the host's file or the config changed (or can no longer be followed) and the client should reload.
+  app.get("/api/host-logs/stream", (c) => {
+    const host = c.req.query("host")?.trim();
+    if (!host) return c.json({ ok: false, error: "Missing host" }, 400);
+    const resolve = async () => {
+      const live = await liveLogConfig();
+      return live.ok ? resolveHostLogFile({ logging: live.logging, servers: live.servers, logDir: config.logDir, host }) : null;
+    };
+    return streamSSE(c, async (stream) => {
+      const first = await resolve();
+      if (!first?.ok) {
+        await stream.writeSSE({ event: "end", data: "" });
+        return;
+      }
+      const key = resolutionKey(first);
+      const follower = new LogFollower(first.path, (raw) => {
+        const lines = parseHostLines(raw, host);
+        if (lines.length > 0) void stream.writeSSE({ data: JSON.stringify(lines) });
+      });
+      await follower.start();
+      stream.onAbort(() => follower.stop());
+      let sincePing = 0;
+      try {
+        while (!stream.aborted) {
+          await stream.sleep(RESOLVE_CHECK_MS);
+          if (stream.aborted) break;
+          const now = await resolve();
+          if (!now || resolutionKey(now) !== key) {
+            await stream.writeSSE({ event: "end", data: "" });
+            break;
+          }
+          sincePing += RESOLVE_CHECK_MS;
+          if (sincePing >= PING_MS) {
+            sincePing = 0;
+            await stream.writeSSE({ event: "ping", data: "" });
+          }
+        }
+      } finally {
+        follower.stop();
+      }
+    });
   });
 
   app.get("/api/upstreams", async (c) => {

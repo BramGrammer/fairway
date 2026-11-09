@@ -21,3 +21,15 @@ export function parseStoredWidth(raw: string | null): number {
   const value = Number(raw)
   return raw !== null && Number.isFinite(value) && value > 0 ? value : DEFAULT_DRAWER_WIDTH
 }
+
+export type DrawerTab = "overview" | "logs"
+
+/** Tabs a node offers: only hosts have a log, so groups and rules get no tab strip. */
+export function drawerTabs(kind: NodeKind): DrawerTab[] {
+  return kind === "host" ? ["overview", "logs"] : []
+}
+
+/** The tab to show: the selected one when this kind has it, otherwise the overview. */
+export function activeTab(kind: NodeKind, selected: DrawerTab): DrawerTab {
+  return drawerTabs(kind).includes(selected) ? selected : "overview"
+}

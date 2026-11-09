@@ -3,10 +3,15 @@ import { FileCodeIcon, XIcon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { HostLogsTab } from "@/features/host-logs-tab"
 import {
+  activeTab,
   clampDrawerWidth,
+  drawerTabs,
   DRAWER_STORAGE_KEY,
   parseStoredWidth,
+  type DrawerTab,
   type NodeKind,
 } from "@/lib/route-drawer"
 import { hostFromLabel, requestShowInEditor } from "@/lib/show-in-editor"
@@ -17,6 +22,8 @@ const KIND_LABELS: Record<NodeKind, string> = {
   destination: "Destination",
   group: "Group",
 }
+
+const TAB_LABELS: Record<DrawerTab, string> = { overview: "Overview", logs: "Logs" }
 
 function readWidth(): number {
   try {
@@ -37,6 +44,10 @@ interface RouteDrawerProps {
 export function RouteDrawer({ name, kind, overview, onClose }: RouteDrawerProps) {
   const ref = useRef<HTMLElement>(null)
   const [width, setWidth] = useState(readWidth)
+  // Kept here so the choice survives moving to another host; kinds without the tab show the overview.
+  const [selectedTab, setSelectedTab] = useState<DrawerTab>("overview")
+  const tabs = drawerTabs(kind)
+  const tab = activeTab(kind, selectedTab)
 
   const resize = useCallback((next: number) => {
     const parent = ref.current?.parentElement?.clientWidth ?? window.innerWidth
@@ -96,7 +107,7 @@ export function RouteDrawer({ name, kind, overview, onClose }: RouteDrawerProps)
       >
         <span className="h-10 w-1 rounded-full bg-border transition-colors group-hover:bg-muted-foreground/50 group-focus-visible:bg-ring" />
       </div>
-      <div className="flex shrink-0 items-center gap-3 border-b px-5 pt-5 pb-4">
+      <div className="flex shrink-0 items-center gap-3 border-b px-5 py-4">
         <h2 className="min-w-0 truncate font-mono text-lg font-semibold tracking-tight">{name}</h2>
         <Badge variant="secondary" className="h-6 px-2.5 text-xs">
           {KIND_LABELS[kind]}
@@ -116,7 +127,20 @@ export function RouteDrawer({ name, kind, overview, onClose }: RouteDrawerProps)
           <XIcon />
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto px-5 py-4">{overview}</div>
+      {tabs.length > 0 && (
+        <Tabs value={tab} onValueChange={(value) => setSelectedTab(value as DrawerTab)} className="shrink-0 gap-0 border-b px-5">
+          <TabsList variant="line" className="h-10 gap-5 p-0">
+            {tabs.map((id) => (
+              <TabsTrigger key={id} value={id} className="h-full flex-none px-0 group-data-horizontal/tabs:after:-bottom-px">
+                {TAB_LABELS[id]}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      )}
+      <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+        {tab === "logs" ? <HostLogsTab host={hostFromLabel(name)} /> : overview}
+      </div>
     </section>
   )
 }

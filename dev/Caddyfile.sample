@@ -7,6 +7,7 @@
 		per_host
 	}
 
+	# Default log: runtime messages plus every host without its own `log` block.
 	log {
 		output file /var/log/caddy/access.log {
 			roll_size 10mb
@@ -16,24 +17,65 @@
 	}
 }
 
-http://app.localhost:8080 {
-	log
+# Public hosts: own JSON log, secrets in the query string are redacted.
+(public_log) {
+	log public {
+		output file /var/log/caddy/access-public.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+		format filter {
+			wrap json
+			request>uri query {
+				replace api_key REDACTED
+				replace token REDACTED
+			}
+		}
+	}
+}
+
+# Internal hosts (custom port 8081): own log, no redaction.
+(internal_log) {
+	log internal {
+		output file /var/log/caddy/access-int.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+		format json
+	}
+}
+
+http://app.example.test:8080 {
+	import public_log
 	encode gzip
 	respond "hello from the dev caddy"
 }
 
-http://api.localhost:8080 {
-	log
+http://api.example.test:8080 {
+	import public_log
 	encode gzip
 	respond "an api" 200
 }
 
-http://admin.localhost:8080 {
+# Bare `log`, no name: logs to the default logger, so lines land in access.log.
+http://plain.example.test:8080 {
 	log
-	respond "nothing here" 404
+	respond "default log" 200
 }
 
-http://files.localhost:8081 {
-	log
-	respond "a second site" 200
+# No `log` block at all. Because another host uses a bare `log`, Caddy lists this host in
+# skip_hosts with its port. A request whose Host header has no port still lands in access.log
+# (curl with a plain Host), one with the port (a browser) is not logged.
+http://quiet.example.test:8080 {
+	respond "not logged" 200
+}
+
+http://admin.example.test:8081 {
+	import internal_log
+	respond "internal admin" 200
+}
+
+http://files.example.test:8081 {
+	import internal_log
+	respond "internal files" 200
 }
