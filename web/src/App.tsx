@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import {
   CircleAlertIcon,
   CircleCheckIcon,
@@ -51,7 +51,10 @@ import { LogsTab } from "@/features/logs-tab"
 import { RoutesTab } from "@/features/routes-tab"
 import { useCaddyfile } from "@/hooks/use-caddyfile"
 import { useIsDark } from "@/hooks/use-is-dark"
-import { api, type StatusInfo } from "@/lib/api"
+import { LoginView } from "@/components/login-form"
+import { UserMenu } from "@/components/user-menu"
+import { api, onSessionLost, type StatusInfo } from "@/lib/api"
+import { decideGate, type AuthStatus, type Gate } from "@/lib/auth"
 
 type View = "editor" | "routes" | "history" | "logs"
 
@@ -69,12 +72,10 @@ function initialView(): View {
 
 function useStatus() {
   const [status, setStatus] = useState<StatusInfo | null>(null)
-  const [denied, setDenied] = useState(false)
   useEffect(() => {
     async function refresh() {
       try {
-        const reply = await api<StatusInfo>("/api/status")
-        setDenied(reply.status === 403)
+        const reply = await api<StatusInfo>("/api/status", undefined, { background: true })
         if (reply.status === 200) setStatus(reply.body)
       } catch {
         setStatus({ caddyReachable: false, auth: { mode: "none" } })
@@ -84,7 +85,7 @@ function useStatus() {
     const timer = setInterval(refresh, 15_000)
     return () => clearInterval(timer)
   }, [])
-  return { status, denied }
+  return status
 }
 
 function StatusBadges({ status }: { status: StatusInfo | null }) {
@@ -98,7 +99,7 @@ function StatusBadges({ status }: { status: StatusInfo | null }) {
             <span className="group-data-[collapsible=icon]:hidden">No authentication</span>
           </TooltipTrigger>
           <TooltipContent side="right">
-            No authentication. Anyone who can reach this page can change your proxy. Use the Tailscale profile to restrict it.
+            No authentication. Anyone who can reach this page can change your proxy. Fairway is meant for an internal network: restrict access at the network layer.
           </TooltipContent>
         </Tooltip>
       )}
@@ -137,33 +138,17 @@ function ThemeMenuItem() {
   )
 }
 
-export default function App() {
+function Editor({ user, onLogout }: { user: string | null; onLogout: () => void }) {
   const [view, setView] = useState<View>(initialView)
   const [topBarSlot, setTopBarSlot] = useState<HTMLElement | null>(null)
   const caddyfile = useCaddyfile()
-  const { status, denied } = useStatus()
+  const status = useStatus()
 
   useEffect(() => onShowInEditor(() => setView("editor")), [])
 
   useEffect(() => {
     window.history.replaceState(null, "", `#${view}`)
   }, [view])
-
-  if (denied) {
-    return (
-      <Empty className="h-svh">
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <ShieldAlertIcon />
-          </EmptyMedia>
-          <EmptyTitle>Access denied</EmptyTitle>
-          <EmptyDescription>
-            This Tailscale user is not allowed to use Fairway.
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    )
-  }
 
   const current = NAV.find((item) => item.id === view)!
 
@@ -210,6 +195,7 @@ export default function App() {
           <SidebarMenu>
             <ThemeMenuItem />
           </SidebarMenu>
+          {user !== null && <UserMenu user={user} onLogout={onLogout} />}
         </SidebarFooter>
         <SidebarRail />
       </Sidebar>
@@ -281,4 +267,40 @@ export default function App() {
       </SidebarInset>
     </SidebarProvider>
   )
+}
+
+/** Decides between the login view and the editor. The editor remounts after a sign in, so unsaved text is dropped. */
+export default function App() {
+  const [gate, setGate] = useState<Gate | "loading">("loading")
+
+  const check = useCallback(async () => {
+    try {
+      const { body } = await api<AuthStatus>("/api/auth/status")
+      setGate(decideGate(body))
+    } catch {
+      // Server unreachable: show the editor, whose own calls report the failure.
+      setGate({ view: "editor", user: null })
+    }
+  }, [])
+
+  useEffect(() => {
+    const timer = setTimeout(() => void check(), 0)
+    const unsubscribe = onSessionLost(() => setGate({ view: "login" }))
+    return () => {
+      clearTimeout(timer)
+      unsubscribe()
+    }
+  }, [check])
+
+  const logout = useCallback(async () => {
+    try {
+      await api("/api/auth/logout", {})
+    } finally {
+      setGate({ view: "login" })
+    }
+  }, [])
+
+  if (gate === "loading") return <div className="min-h-svh bg-background" />
+  if (gate.view === "login") return <LoginView onSignedIn={() => void check()} />
+  return <Editor user={gate.user} onLogout={() => void logout()} />
 }

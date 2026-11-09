@@ -13,7 +13,7 @@ export function useTlsConfig(active: boolean, intervalMs = 300_000): TlsStates {
     if (!active) return
     let stopped = false
     const load = () =>
-      api<TlsConfigReply>("/api/tls")
+      api<TlsConfigReply>("/api/tls", undefined, { background: true })
         .then(({ body }) => {
           if (!stopped) setStates(statesFrom(body))
         })

@@ -1,18 +1,52 @@
+import { isSessionLost, type AuthStatus } from "@/lib/auth"
+
 export interface Reply<T = unknown> {
   status: number
   body: T
 }
 
+type SessionLostListener = () => void
+const sessionLostListeners = new Set<SessionLostListener>()
+
+/** Called when any API call finds the session gone. Returns the unsubscribe. */
+export function onSessionLost(listener: SessionLostListener) {
+  sessionLostListeners.add(listener)
+  return () => {
+    sessionLostListeners.delete(listener)
+  }
+}
+
+function sessionLost() {
+  sessionLostListeners.forEach((listener) => listener())
+}
+
 export async function api<T = unknown>(
   path: string,
-  body?: unknown
+  body?: unknown,
+  options: { background?: boolean } = {}
 ): Promise<Reply<T>> {
+  const headers: Record<string, string> = {}
+  if (body !== undefined) headers["Content-Type"] = "application/json"
+  // Periodic polls must not keep a forgotten tab signed in: the server does not renew the session for these.
+  if (options.background) headers["X-Fairway-Background"] = "1"
   const response = await fetch(path, {
     method: body === undefined ? "GET" : "POST",
-    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   })
-  return { status: response.status, body: (await response.json()) as T }
+  if (isSessionLost(path, response.status)) sessionLost()
+  return { status: response.status, body: (await response.json().catch(() => ({}))) as T }
+}
+
+/** An EventSource that re-checks the sign-in status when it errors, since a 401 gives no detail. */
+export function openStream(url: string): EventSource {
+  const source = new EventSource(url)
+  source.addEventListener("error", () => {
+    void api<AuthStatus>("/api/auth/status").then(({ status, body }) => {
+      if (status === 200 && body.mode === "login" && !body.signedIn) sessionLost()
+    }, () => {})
+  })
+  return source
 }
 
 export interface Warning {
@@ -34,8 +68,10 @@ export interface RevisionMeta {
 
 export interface StatusInfo {
   caddyReachable: boolean
-  auth: { mode: "none" } | { mode: "tailscale"; user: string | null }
+  auth: { mode: "none" | "login" }
 }
+
+export type { AuthStatus }
 
 export type ValidateResult =
   | { ok: true; warnings: Warning[] }
@@ -163,5 +199,5 @@ export async function fetchHostLogs(host: string): Promise<HostLogReply> {
 
 /** Opens the live tail of a host's log. Data events are JSON arrays of lines; an `end` event means reload. */
 export function openHostLogStream(host: string): EventSource {
-  return new EventSource(`/api/host-logs/stream?host=${encodeURIComponent(host)}`)
+  return openStream(`/api/host-logs/stream?host=${encodeURIComponent(host)}`)
 }

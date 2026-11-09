@@ -8,7 +8,7 @@ A private web interface for editing the Caddy reverse proxy's configuration and 
 The human-written configuration text for the Caddy instance.
 
 **Fairway**:
-The web application this project builds. Reachable only from the owner's tailnet.
+The web application this project builds. Meant for an internal network; it is not designed to be exposed to the internet.
 
 **Admin API**:
 Caddy's own control interface, used by Fairway to validate and reload a Caddyfile.
@@ -36,6 +36,12 @@ The TLS identity Caddy presents to visitors of a Site. Obtained and renewed by C
 
 **Access log**:
 A record of the requests Caddy handled for a Site, written to a file chosen in the Caddyfile. Distinct from Caddy's runtime log, which records Caddy's own events.
+
+**Owner**:
+The single person who signs in to Fairway. There are no other users or roles. Their username and password come from Fairway's environment.
+
+**Session**:
+The period during which the Owner is signed in. It ends when they sign out, after a stretch of inactivity, or after a fixed maximum.
 
 **Revision**:
 A saved, timestamped version of the Caddyfile that has been applied. Can be diffed against and rolled back to.

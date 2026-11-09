@@ -23,6 +23,9 @@ services:
       CADDYFILE_PATH: /caddyfile/Caddyfile
       LOG_DIR: /var/log/caddy
       DATA_DIR: /data
+      # Throwaway login for the dev stack. Remove both lines to try the open mode.
+      AUTH_USER: dev
+      AUTH_PASSWORD: dev
     ports:
       - "127.0.0.1:3000:3000"
     volumes:

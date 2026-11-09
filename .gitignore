@@ -3,5 +3,4 @@ dist
 dev/run
 .env
 data
-tailscale/state
 .DS_Store

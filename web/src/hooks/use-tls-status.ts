@@ -12,7 +12,7 @@ export function useTlsStatus(active: boolean, intervalMs = 60_000) {
     let stopped = false
     const poll = () => {
       if (document.visibilityState === "hidden") return
-      api<TlsStatusReply>("/api/tls/status")
+      api<TlsStatusReply>("/api/tls/status", undefined, { background: true })
         .then(({ body }) => {
           if (!stopped) setReply(body)
         })

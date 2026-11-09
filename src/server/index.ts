@@ -6,6 +6,5 @@ const config = loadConfig();
 const app = await createApp(config);
 
 serve({ fetch: app.fetch, port: config.port, hostname: config.host }, ({ port }) => {
-  const auth = config.requireTailscaleLogin ? `Tailscale login ${config.requireTailscaleLogin}` : "no authentication";
-  console.log(`fairway listening on :${port} (${auth})`);
+  console.log(`fairway listening on :${port} (${config.authUser ? "login required" : "no authentication"})`);
 });
