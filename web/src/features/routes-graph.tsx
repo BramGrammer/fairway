@@ -182,7 +182,59 @@ function buildRaw(sites: Site[]): Raw {
       }
     }
   }
+  splitConflicts(raw)
   return raw
+}
+
+/**
+ * Routes can run the same middleware in a different order (a `route` block keeps the written order, while
+ * Caddy sorts everything else). The order most routes agree on wins; on a route that disagrees, the middleware
+ * that is out of place gets a second node, so no line runs backwards and no column has to stretch to fit both.
+ */
+function splitConflicts(raw: Raw) {
+  const orders = [...new Set(raw.paths.map((path) => path.steps))]
+  const votes = new Map<string, number>()
+  for (const steps of orders)
+    steps.forEach((a, i) => {
+      for (const b of steps.slice(i + 1)) votes.set(`${a}\n${b}`, (votes.get(`${a}\n${b}`) ?? 0) + 1)
+    })
+
+  const after = new Map<string, string[]>()
+  const reaches = (from: string, to: string, seen = new Set<string>()): boolean =>
+    from === to || (!seen.has(from) && seen.add(from) && (after.get(from) ?? []).some((next) => reaches(next, to, seen)))
+  for (const [pair] of [...votes].sort((a, b) => b[1] - a[1])) {
+    const [a, b] = pair.split("\n")
+    if (!reaches(b, a)) after.set(a, [...(after.get(a) ?? []), b])
+  }
+
+  const rank = new Map<string, number>()
+  const rankOf = (id: string): number => {
+    const known = rank.get(id)
+    if (known !== undefined) return known
+    const value = 1 + Math.max(0, ...[...after].filter(([, next]) => next.includes(id)).map(([from]) => rankOf(from)))
+    rank.set(id, value)
+    return value
+  }
+
+  const fixed = new Map<string[], string[]>()
+  for (const steps of orders) {
+    let previous = 0
+    fixed.set(
+      steps,
+      steps.map((id) => {
+        if (rankOf(id) > previous) {
+          previous = rankOf(id)
+          return id
+        }
+        const copy = `${id}~`
+        const chip = raw.steps.get(id)?.chip
+        if (chip && !raw.steps.has(copy)) raw.steps.set(copy, { id: copy, chip })
+        previous += 1
+        return copy
+      }),
+    )
+  }
+  for (const path of raw.paths) path.steps = fixed.get(path.steps) ?? path.steps
 }
 
 const hostGroupLabel = (site: Site) => {
