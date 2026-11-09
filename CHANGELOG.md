@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/BramGrammer/fairway/compare/v0.2.0...v0.2.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* **routes:** draw middleware that runs in a different order as a separate node ([b15fa99](https://github.com/BramGrammer/fairway/commit/b15fa99969b22ee24d524ced5017e0ab8e0b9214))
+
 ## [0.2.0](https://github.com/BramGrammer/fairway/compare/v0.1.0...v0.2.0) (2026-11-08)
 
 
