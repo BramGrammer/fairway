@@ -81,6 +81,19 @@ Versions, the changelog and the image are produced by [release-please](https://g
 
 CI (typecheck, lint, tests) runs on every push and pull request. The release pull request itself is made with the built-in token, so GitHub does not run CI on it; it only changes version files and the changelog. The repository setting "Allow GitHub Actions to create and approve pull requests" must be on.
 
+### GHCR publishing permissions
+
+The release workflow uses `GITHUB_TOKEN` with `packages: write`. An existing GHCR package must also allow this repository's workflows to write to it; successful registry login and public pull access do not grant publishing access.
+
+If `publish` fails with `denied: permission_denied: write_package`:
+
+1. As a package administrator, open the [`fairway` package](https://github.com/users/BramGrammer/packages/container/package/fairway), then **Package settings → Manage Actions access**.
+2. Add `BramGrammer/fairway` (or update its existing entry) with the **Write** role. Linking the source repository alone is not sufficient if the package does not inherit its permissions.
+3. On the failed Release run, select **Re-run failed jobs**. Do not re-run all jobs: the successful release-please job already created the release, and running it again may return `release_created=false`, skipping `publish`.
+4. Verify that the version, minor-version and `latest` image tags were published.
+
+This package-side permission must be corrected on GitHub; changing workflow permissions or image labels cannot grant access to an existing package. See [GitHub's package access documentation](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility#ensuring-workflow-access-to-your-package).
+
 ## TLS probing
 
 Caddy's admin API reports configuration, not certificates. When `TLS_PROBE_ADDR` is set, opening a host's TLS tab makes a TLS handshake to that address with the host's name and shows the Certificate actually served: issuer, expiry and the names it covers. Results are cached for 10 minutes; the Re-check button probes again.
