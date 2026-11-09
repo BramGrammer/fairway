@@ -129,3 +129,39 @@ export type MetricsReply =
       hosts: Record<string, HostStats>
     }
   | { ok: false; error: string }
+
+export interface HostLogLine {
+  time: number | null
+  status: number | null
+  method: string
+  host: string
+  uri: string
+  client: string
+  duration: number | null
+  size: number | null
+  userAgent: string
+  raw: Record<string, unknown>
+}
+
+export type HostLogReply =
+  | { ok: true; file: string; lines: HostLogLine[] }
+  | { ok: false; reason: "no-file-writer"; output: string }
+  | { ok: false; reason: "missing-file"; file: string; configuredPath: string }
+  | { ok: false; reason: "not-logged" }
+  /** Caddy could not be reached (no `reason`). */
+  | { ok: false; reason?: undefined; error: string }
+
+/** The recent access log lines of one host, read live from the running config. */
+export async function fetchHostLogs(host: string): Promise<HostLogReply> {
+  try {
+    const { body } = await api<HostLogReply>(`/api/host-logs?host=${encodeURIComponent(host)}`)
+    return body
+  } catch (error) {
+    return { ok: false, error: (error as Error).message }
+  }
+}
+
+/** Opens the live tail of a host's log. Data events are JSON arrays of lines; an `end` event means reload. */
+export function openHostLogStream(host: string): EventSource {
+  return new EventSource(`/api/host-logs/stream?host=${encodeURIComponent(host)}`)
+}

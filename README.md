@@ -25,6 +25,16 @@ Validate, Format and Routes only read your Caddyfile (`/adapt` never applies it)
 
 Fairway: http://127.0.0.1:3000. The dev Caddy serves http://127.0.0.1:8080 and :8081. Change the response text in the editor, deploy, and watch `:8080` change with no restart. `npm run dev:down` stops it, `npm run dev:reset` also wipes its state.
 
+The sample Caddyfile (`dev/Caddyfile.sample`) writes three logs into `dev/run/logs`, which Fairway reads: `access-public.log` (hosts on :8080, with `api_key` and `token` query values redacted), `access-int.log` (hosts on :8081, no redaction) and the default `access.log` (runtime messages plus hosts without their own named log). `dev:up` only copies the sample to `dev/run/Caddyfile` when that file does not exist, so after the sample changes run `npm run dev:reset` (or delete `dev/run/Caddyfile`) to pick it up. Send test requests with a Host header:
+
+```
+curl -H 'Host: app.example.test' 'http://127.0.0.1:8080/?api_key=secret&x=1'    # public log, api_key redacted
+curl -H 'Host: admin.example.test' 'http://127.0.0.1:8081/?token=abc'           # internal log, not redacted
+curl -H 'Host: plain.example.test' 'http://127.0.0.1:8080/'                     # default access.log
+curl -H 'Host: quiet.example.test' 'http://127.0.0.1:8080/'                     # no log block: default access.log without a port in Host
+curl -H 'Host: quiet.example.test:8080' 'http://127.0.0.1:8080/'                # what a browser sends: skipped, not logged
+```
+
 Frontend work with hot reload: keep the dev stack running and start `npm run dev:web` (Vite on http://localhost:5173, proxying `/api` to the editor on :3000).
 
 ```
