@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react"
-import { ChevronRightIcon, InfoIcon, PauseIcon, PlayIcon, ScrollTextIcon } from "lucide-react"
+import { ArrowUpIcon, ChevronRightIcon, InfoIcon, PauseIcon, PlayIcon, ScrollTextIcon } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -34,6 +34,7 @@ import {
   type LogFilter,
   type StatusClass,
 } from "@/lib/host-log-filter"
+import { newestFirst, visibleRows } from "@/lib/host-log-view"
 import { PRESSED } from "@/lib/toggle-styles"
 import { cn } from "@/lib/utils"
 
@@ -51,6 +52,8 @@ const STATUS_CLASSES: StatusClass[] = ["2xx", "3xx", "4xx", "5xx"]
 const MAX_LINES = 500
 const RECONNECT_MS = 2000
 const RETRY_MS = 5000
+/** Scrolled further than this (px) from the top, the reader is taken to be reading and the list holds still. */
+const READING_OFFSET = 8
 
 interface Row {
   /** Increases with arrival order, never reused. */
@@ -64,16 +67,6 @@ interface HostLogState {
   rows: Row[]
   /** While paused, the id of the last row that was visible when pausing. */
   pausedAfter: number | null
-}
-
-/**
- * The rows to show and how many arrived but are held back. This is the one place the displayed list
- * is derived from what has arrived.
- */
-function visibleRows(rows: Row[], pausedAfter: number | null): { shown: Row[]; held: number } {
-  if (pausedAfter === null) return { shown: rows, held: 0 }
-  const shown = rows.filter((row) => row.id <= pausedAfter)
-  return { shown, held: rows.length - shown.length }
 }
 
 /**
@@ -150,10 +143,6 @@ function LogTable({ rows }: { rows: Row[] }) {
       if (!next.delete(id)) next.add(id)
       return next
     })
-  const end = useRef<HTMLTableRowElement>(null)
-  useEffect(() => {
-    end.current?.scrollIntoView({ block: "end" })
-  }, [rows])
   return (
     <div className="overflow-hidden rounded-lg border">
       <Table className="font-mono text-xs [&_td]:px-1.5 [&_th]:px-1.5">
@@ -220,9 +209,6 @@ function LogTable({ rows }: { rows: Row[] }) {
               </Fragment>
             )
           })}
-          <TableRow ref={end} className="h-0 border-0 hover:bg-transparent">
-            <TableCell colSpan={8} className="p-0" />
-          </TableRow>
         </TableBody>
       </Table>
     </div>
@@ -248,10 +234,31 @@ export function HostLogsTab({ host }: { host: string }) {
   const { reply, rows, pausedAfter, setPaused } = useHostLog(host)
   const [classes, setClasses] = useState<StatusClass[]>([])
   const [query, setQuery] = useState("")
-  const { shown, held } = visibleRows(rows, pausedAfter)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const latestId = useRef(-1)
+  useEffect(() => {
+    latestId.current = rows.at(-1)?.id ?? -1
+  }, [rows])
+  // While the reader is scrolled away from the newest lines, new lines are held back so the list stays put.
+  const [reading, setReading] = useState<{ host: string; after: number } | null>(null)
+  useEffect(() => {
+    const scroller = rootRef.current?.parentElement
+    if (!scroller) return
+    const onScroll = () =>
+      setReading((current) => (scroller.scrollTop > READING_OFFSET ? (current?.host === host ? current : { host, after: latestId.current }) : null))
+    scroller.addEventListener("scroll", onScroll, { passive: true })
+    return () => scroller.removeEventListener("scroll", onScroll)
+  }, [host])
+  const readingAfter = reading?.host === host ? reading.after : null
+  const { shown, held } = visibleRows(rows, pausedAfter ?? readingAfter)
+  const unread = pausedAfter === null && readingAfter !== null ? held : 0
+  const showNew = () => {
+    rootRef.current?.parentElement?.scrollTo({ top: 0 })
+    setReading(null)
+  }
   const filter: LogFilter = { classes: new Set(classes), query }
   const matching = new Set(filterLines(shown.map((row) => row.line), filter))
-  const visible = shown.filter((row) => matching.has(row.line))
+  const visible = newestFirst(shown.filter((row) => matching.has(row.line)))
   const filtering = classes.length > 0 || query.trim() !== ""
   const paused = pausedAfter !== null
 
@@ -310,7 +317,15 @@ export function HostLogsTab({ host }: { host: string }) {
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div ref={rootRef} className="flex flex-col gap-3">
+      <div className="pointer-events-none sticky top-2 z-10 -mb-3 flex h-0 justify-center">
+        {unread > 0 && (
+          <Button size="sm" className="pointer-events-auto rounded-full shadow-md" onClick={showNew}>
+            <ArrowUpIcon data-icon="inline-start" />
+            {unread} new {unread === 1 ? "request" : "requests"}
+          </Button>
+        )}
+      </div>
       <PrivacyNote />
       {content}
     </div>
