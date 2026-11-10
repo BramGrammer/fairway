@@ -21,10 +21,13 @@ import { TlsSweep } from "./tls-sweep.js";
 const RESOLVE_CHECK_MS = 3_000;
 const PING_MS = 15_000;
 
-export async function createApp(config: Config) {
+/** `onShutdown` collects work to finish before the process exits. */
+export async function createApp(config: Config, onShutdown: Array<() => Promise<void>> = []) {
   const admin = new CaddyAdmin(config.adminSocket);
-  const metrics = new MetricsTracker(admin);
+  const metrics = new MetricsTracker(admin, undefined, join(config.dataDir, "metrics.json"));
+  await metrics.load();
   metrics.start();
+  onShutdown.push(() => metrics.save());
   const store = new Store(config.dataDir, config.maxRevisions);
   await store.init();
   const deployer = new Deployer(config.caddyfilePath, admin, store);

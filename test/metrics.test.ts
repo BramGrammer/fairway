@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import type { CaddyAdmin } from "../src/server/caddy-admin.js";
 import { MetricsTracker, parseMetrics } from "../src/server/metrics.js";
@@ -10,7 +13,7 @@ const series = (host: string, code: string, count: number, seconds: number, byte
     `caddy_http_response_size_bytes_sum{code="${code}",handler="subroute",host="${host}",method="${method}",server="srv0"} ${bytes}`,
   ].join("\n");
 
-const tracker = () => new MetricsTracker({} as CaddyAdmin, 5000, 60);
+const tracker = () => new MetricsTracker({} as CaddyAdmin);
 
 test("parseMetrics sums over code, method and handler per host", () => {
   const text = [
@@ -102,4 +105,99 @@ test("history is binned across the window", () => {
   const { host } = stats(t, 5 * MIN, 5 * MIN);
   assert.equal(host.history.length, 60);
   assert.equal(host.history[host.history.length - 1], 5);
+});
+
+const persisted = async () => {
+  const file = join(await mkdtemp(join(tmpdir(), "fairway-metrics-")), "metrics.json");
+  return { file, make: () => new MetricsTracker({} as CaddyAdmin, 5000, file) };
+};
+
+test("history survives a restart", async () => {
+  const { make } = await persisted();
+  const before = make();
+  at(before, series("a.test", "200", 100, 10), 0);
+  at(before, series("a.test", "200", 130, 13), 10_000);
+  await before.save(10_000);
+
+  const after = make();
+  await after.load(15_000);
+  assert.equal(after.snapshot(5 * MIN, 15_000).ok, true);
+  // Caddy kept running: the next sample continues from the saved counters.
+  at(after, series("a.test", "200", 140, 14), 15_000);
+  const { host, snap } = stats(after, 5 * MIN, 15_000);
+  assert.equal(host.requests, 30); // the saved samples; the gap joins the day view only
+  assert.equal(snap.coveredMs, 15_000);
+  assert.equal(stats(after, 24 * 60 * MIN, 15_000).host.requests, 40);
+});
+
+test("requests served while the editor was down count in the day view but not the live rate", async () => {
+  const { make } = await persisted();
+  const before = make();
+  at(before, series("a.test", "200", 100, 10), 0);
+  await before.save(5_000);
+
+  const after = make();
+  await after.load(10 * MIN);
+  at(after, series("a.test", "200", 160, 16), 10 * MIN);
+  assert.equal(stats(after, 24 * 60 * MIN, 10 * MIN).host.requests, 60);
+  assert.equal(stats(after, 5 * MIN, 10 * MIN).host.requests, 0);
+  assert.equal(stats(after, 5 * MIN, 10 * MIN).host.rate, 0);
+});
+
+test("a counter that went down after the restart means Caddy restarted too", async () => {
+  const { make } = await persisted();
+  const before = make();
+  at(before, series("a.test", "200", 500, 50), 0);
+  await before.save(5_000);
+
+  const after = make();
+  await after.load(10_000);
+  at(after, series("a.test", "200", 7, 1), 10_000);
+  assert.equal(stats(after, 24 * 60 * MIN, 10_000).host.requests, 7);
+});
+
+test("a baseline saved more than a day ago is not counted", async () => {
+  const { make } = await persisted();
+  const before = make();
+  at(before, series("a.test", "200", 100, 10), 0);
+  await before.save(0);
+
+  const after = make();
+  await after.load(2 * 24 * 60 * MIN);
+  at(after, series("a.test", "200", 900, 90), 2 * 24 * 60 * MIN);
+  assert.equal(stats(after, 24 * 60 * MIN, 2 * 24 * 60 * MIN).host.requests, 0);
+});
+
+test("entries older than the kept window are dropped on load", async () => {
+  const { make } = await persisted();
+  const before = make();
+  at(before, series("a.test", "200", 0, 0), 0);
+  at(before, series("a.test", "200", 10, 1), 5_000);
+  await before.save(5_000);
+
+  const after = make();
+  await after.load(30 * 60 * MIN);
+  at(after, series("a.test", "200", 10, 1), 30 * 60 * MIN);
+  assert.equal(stats(after, 24 * 60 * MIN, 30 * 60 * MIN).host.requests, 0);
+});
+
+test("a missing, corrupt or foreign file leaves the tracker empty", async () => {
+  const { file, make } = await persisted();
+  await make().load(0); // missing
+  for (const text of ["not json", "[]", JSON.stringify({ version: 99 }), JSON.stringify({ version: 1, savedAt: 0, since: null, previous: null, samples: [{ t: "x" }], buckets: [] })]) {
+    await writeFile(file, text);
+    const t = make();
+    await t.load(0);
+    at(t, series("a.test", "200", 5, 1), 0);
+    assert.equal(stats(t, 5 * MIN, 0).host.requests, 0, text);
+  }
+});
+
+test("saving leaves no temporary file behind", async () => {
+  const { file, make } = await persisted();
+  const t = make();
+  at(t, series("a.test", "200", 1, 1), 0);
+  await t.save(0);
+  assert.equal(JSON.parse(await readFile(file, "utf8")).version, 1);
+  await assert.rejects(readFile(`${file}.tmp`));
 });

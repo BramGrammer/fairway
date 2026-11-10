@@ -106,7 +106,7 @@ Fairway has one **Owner**. Set `AUTH_USER` and either `AUTH_PASSWORD` or `AUTH_P
 | --- | --- | --- |
 | `ADMIN_SOCKET` | `/run/caddy-admin/admin.sock` | Caddy admin API socket |
 | `CADDYFILE_PATH` | `/caddyfile/Caddyfile` | The mounted Caddyfile |
-| `DATA_DIR` | `/data` | Original and Revisions |
+| `DATA_DIR` | `/data` | Original, Revisions, the login secret and the traffic history (`metrics.json`). Mount it as a volume to keep them across restarts |
 | `LOG_DIR`, `LOG_FILE` | `/var/log/caddy`, `access.log` | Where Caddy writes its JSON log. The TLS tab's last issuance error needs Caddy's default logger (not only access logs) to write here. |
 | `MAX_REVISIONS` | `50` | Deployed Revisions kept |
 | `AUTH_USER`, `AUTH_PASSWORD` | unset | The Owner's login, see [Login](#login). Both, or neither |

@@ -1,3 +1,5 @@
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import type { CaddyAdmin } from "./caddy-admin.js";
 
 export interface Counters {
@@ -131,6 +133,50 @@ const BUCKET_MS = 60_000; // then one-minute buckets, up to a day back
 const COARSE_KEEP_MS = 24 * 60 * 60_000;
 const RATE_MS = 30_000;
 const POINTS = 60;
+const SAVE_MS = 60_000;
+const FILE_VERSION = 1;
+
+interface SavedSlice {
+  t: number;
+  delta: [string, Delta][];
+}
+
+/** What is written to disk: enough to carry the history across a restart of the editor. */
+interface SavedMetrics {
+  version: typeof FILE_VERSION;
+  savedAt: number;
+  since: number | null;
+  /** The last counters seen, so requests served while the editor was down can be counted afterwards. */
+  previous: [string, Counters][] | null;
+  samples: SavedSlice[];
+  buckets: SavedSlice[];
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const isNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const CODE_KEYS = ["2xx", "3xx", "4xx", "5xx", "other"];
+
+function validCodes(v: unknown): boolean {
+  return isRecord(v) && CODE_KEYS.every((key) => isNumber(v[key]));
+}
+function validCounters(v: unknown): v is Counters {
+  return isRecord(v) && isNumber(v.total) && isNumber(v.bytes) && isNumber(v.seconds) && isNumber(v.inFlight) && validCodes(v.codes);
+}
+function validDelta(v: unknown): v is Delta {
+  return isRecord(v) && isNumber(v.n) && isNumber(v.seconds) && isNumber(v.bytes) && validCodes(v.codes);
+}
+function validSlices(v: unknown): v is SavedSlice[] {
+  return (
+    Array.isArray(v) &&
+    v.every(
+      (slice) =>
+        isRecord(slice) &&
+        isNumber(slice.t) &&
+        Array.isArray(slice.delta) &&
+        slice.delta.every((pair) => Array.isArray(pair) && typeof pair[0] === "string" && validDelta(pair[1])),
+    )
+  );
+}
 
 /** Samples Caddy's metrics on a timer and keeps rolling history, so the UI can show a recent window instead of totals since start. */
 export class MetricsTracker {
@@ -142,10 +188,15 @@ export class MetricsTracker {
   private config: { perHost: boolean } | null = null;
   private error: string | null = null;
   private timer: NodeJS.Timeout | null = null;
+  private saveTimer: NodeJS.Timeout | null = null;
+  /** True after a load: the next sample covers the time the editor was down. */
+  private catchUp = false;
 
+  /** With `file`, the history is saved there and read back by `load()`. */
   constructor(
     private readonly admin: CaddyAdmin,
     private readonly intervalMs = 5000,
+    private readonly file?: string,
   ) {}
 
   start(): void {
@@ -153,11 +204,62 @@ export class MetricsTracker {
     void this.poll();
     this.timer = setInterval(() => void this.poll(), this.intervalMs);
     this.timer.unref();
+    if (this.file) {
+      this.saveTimer = setInterval(() => void this.save().catch(() => {}), SAVE_MS);
+      this.saveTimer.unref();
+    }
   }
 
   stop(): void {
     if (this.timer) clearInterval(this.timer);
+    if (this.saveTimer) clearInterval(this.saveTimer);
     this.timer = null;
+    this.saveTimer = null;
+  }
+
+  /** Reads the saved history. A missing, unreadable or foreign file leaves the tracker empty. */
+  async load(now = Date.now()): Promise<void> {
+    if (!this.file) return;
+    let data: unknown;
+    try {
+      data = JSON.parse(await readFile(this.file, "utf8"));
+    } catch {
+      return;
+    }
+    if (!isRecord(data) || data.version !== FILE_VERSION || !isNumber(data.savedAt)) return;
+    if (!validSlices(data.samples) || !validSlices(data.buckets)) return;
+    const previous = data.previous;
+    if (previous !== null && !(Array.isArray(previous) && previous.every((p) => Array.isArray(p) && typeof p[0] === "string" && validCounters(p[1])))) return;
+    if (data.since !== null && !isNumber(data.since)) return;
+
+    const revive = (slices: SavedSlice[], keepFrom: number): Slice[] =>
+      slices.filter((slice) => slice.t >= keepFrom).map((slice) => ({ t: slice.t, delta: new Map(slice.delta) }));
+    this.samples = revive(data.samples, now - FINE_KEEP_MS);
+    this.buckets = revive(data.buckets, now - COARSE_KEEP_MS);
+    this.since = data.since;
+    // Too old a baseline would count requests from before the window as new.
+    if (previous && data.savedAt >= now - COARSE_KEEP_MS) {
+      this.previous = new Map(previous as [string, Counters][]);
+      this.catchUp = true;
+    }
+  }
+
+  /** Writes the history to disk, through a temporary file so a crash cannot leave half a file. */
+  async save(now = Date.now()): Promise<void> {
+    if (!this.file) return;
+    const slices = (list: Slice[]): SavedSlice[] => list.map((slice) => ({ t: slice.t, delta: [...slice.delta] }));
+    const data: SavedMetrics = {
+      version: FILE_VERSION,
+      savedAt: now,
+      since: this.since,
+      previous: this.previous ? [...this.previous] : null,
+      samples: slices(this.samples),
+      buckets: slices(this.buckets),
+    };
+    await mkdir(dirname(this.file), { recursive: true });
+    const tmp = `${this.file}.tmp`;
+    await writeFile(tmp, JSON.stringify(data));
+    await rename(tmp, this.file);
   }
 
   private async poll(): Promise<void> {
@@ -178,7 +280,10 @@ export class MetricsTracker {
       const delta = new Map<string, Delta>();
       for (const [host, counters] of sample) delta.set(host, growth(counters, this.previous.get(host)));
 
-      this.samples.push({ t: now, delta });
+      // Requests served while the editor was down have no known time: they join the minute bucket only,
+      // so they count in the day view without spiking the live rate.
+      if (!this.catchUp) this.samples.push({ t: now, delta });
+      this.catchUp = false;
       while (this.samples.length > 0 && this.samples[0].t < now - FINE_KEEP_MS) this.samples.shift();
 
       const start = Math.floor(now / BUCKET_MS) * BUCKET_MS;
