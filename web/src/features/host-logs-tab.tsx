@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react"
+import { Fragment, useContext, useEffect, useRef, useState } from "react"
 import { ArrowUpIcon, ChevronRightIcon, InfoIcon, PauseIcon, PlayIcon, ScrollTextIcon } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -34,6 +34,7 @@ import {
   type LogFilter,
   type StatusClass,
 } from "@/lib/host-log-filter"
+import { LoginRequiredContext } from "@/lib/login-context"
 import { newestFirst, visibleRows } from "@/lib/host-log-view"
 import { PRESSED } from "@/lib/toggle-styles"
 import { cn } from "@/lib/utils"
@@ -234,6 +235,7 @@ export function HostLogsTab({ host }: { host: string }) {
   const { reply, rows, pausedAfter, setPaused } = useHostLog(host)
   const [classes, setClasses] = useState<StatusClass[]>([])
   const [query, setQuery] = useState("")
+  const loginRequired = useContext(LoginRequiredContext)
   const rootRef = useRef<HTMLDivElement>(null)
   const latestId = useRef(-1)
   useEffect(() => {
@@ -326,7 +328,7 @@ export function HostLogsTab({ host }: { host: string }) {
           </Button>
         )}
       </div>
-      <PrivacyNote />
+      {!loginRequired && <PrivacyNote />}
       {content}
     </div>
   )

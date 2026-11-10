@@ -54,6 +54,7 @@ import { useIsDark } from "@/hooks/use-is-dark"
 import { LoginView } from "@/components/login-form"
 import { UserMenu } from "@/components/user-menu"
 import { api, onSessionLost, type StatusInfo } from "@/lib/api"
+import { LoginRequiredContext } from "@/lib/login-context"
 import { decideGate, type AuthStatus, type Gate } from "@/lib/auth"
 
 type View = "editor" | "routes" | "history" | "logs"
@@ -302,5 +303,9 @@ export default function App() {
 
   if (gate === "loading") return <div className="min-h-svh bg-background" />
   if (gate.view === "login") return <LoginView onSignedIn={() => void check()} />
-  return <Editor user={gate.user} onLogout={() => void logout()} />
+  return (
+    <LoginRequiredContext value={gate.user !== null}>
+      <Editor user={gate.user} onLogout={() => void logout()} />
+    </LoginRequiredContext>
+  )
 }
