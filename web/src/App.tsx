@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import {
+  ActivityIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   FileCodeIcon,
@@ -46,6 +47,7 @@ import { TopBarSlotProvider } from "@/components/top-bar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { onShowInEditor } from "@/lib/show-in-editor"
 import { EditorTab } from "@/features/editor-tab"
+import { EventsTab } from "@/features/events-tab"
 import { HistoryTab } from "@/features/history-tab"
 import { LogsTab } from "@/features/logs-tab"
 import { RoutesTab } from "@/features/routes-tab"
@@ -57,12 +59,13 @@ import { api, onSessionLost, type StatusInfo } from "@/lib/api"
 import { LoginRequiredContext } from "@/lib/login-context"
 import { decideGate, type AuthStatus, type Gate } from "@/lib/auth"
 
-type View = "editor" | "routes" | "history" | "logs"
+type View = "editor" | "routes" | "history" | "events" | "logs"
 
 const NAV: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "editor", label: "Editor", icon: FileCodeIcon },
   { id: "routes", label: "Routes", icon: RouteIcon },
   { id: "history", label: "History", icon: HistoryIcon },
+  { id: "events", label: "Events", icon: ActivityIcon },
   { id: "logs", label: "Logs", icon: ScrollTextIcon },
 ]
 
@@ -258,6 +261,12 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
               }}
               onRolledBack={caddyfile.load}
             />
+          </div>
+        )}
+
+        {view === "events" && (
+          <div className="min-h-0 flex-1">
+            <EventsTab />
           </div>
         )}
 

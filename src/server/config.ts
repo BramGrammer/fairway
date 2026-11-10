@@ -11,6 +11,14 @@ export interface Config {
   maxRevisions: number;
   /** Caddy's TLS address (`host[:port]`) for probing Certificates; null disables probing. */
   tlsProbeAddr: string | null;
+  /** Opt-in synthetic check of each host; also needs `tlsProbeAddr`. */
+  hostCheck: boolean;
+  /** ntfy topic addresses (comma separated); empty means alerting is off. Never sent back through the API. */
+  ntfyUrl: string | null;
+  /** Access token for the ntfy topic, if it needs a login. */
+  ntfyToken: string | null;
+  /** Fairway's own address, used for the link in an Alert. */
+  publicUrl: string | null;
   webRoot: string;
   /** The Owner's login. Neither set means Fairway runs open; a hash wins over a password. */
   authUser: string | null;
@@ -32,6 +40,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     logFile: env.LOG_FILE ?? "access.log",
     maxRevisions: Number(env.MAX_REVISIONS ?? 50),
     tlsProbeAddr: env.TLS_PROBE_ADDR?.trim() || null,
+    hostCheck: /^(1|true|on)$/i.test(env.HOST_CHECK?.trim() ?? ""),
+    ntfyUrl: env.NTFY_URL?.trim() || null,
+    ntfyToken: env.NTFY_TOKEN?.trim() || null,
+    publicUrl: env.PUBLIC_URL?.trim() || null,
     webRoot: env.WEB_ROOT ?? "dist/web",
     authUser: env.AUTH_USER || null,
     authPassword: env.AUTH_PASSWORD || null,

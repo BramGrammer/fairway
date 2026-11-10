@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { HostLogsTab } from "@/features/host-logs-tab"
+import { TimelineStrip } from "@/features/timeline-strip"
 import {
   activeTab,
   clampDrawerWidth,
@@ -139,6 +140,11 @@ export function RouteDrawer({ name, kind, overview, onClose }: RouteDrawerProps)
         </Tabs>
       )}
       <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+        {kind === "host" && tab === "overview" && (
+          <div className="mb-4">
+            <TimelineStrip host={hostFromLabel(name)} />
+          </div>
+        )}
         {tab === "logs" ? <HostLogsTab host={hostFromLabel(name)} /> : overview}
       </div>
     </section>

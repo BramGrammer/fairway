@@ -3,9 +3,12 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { join } from "node:path";
 import { createAuth, parseTrustProxy } from "./auth.js";
+import { NtfySender, parseNtfyUrls } from "./alerts.js";
 import { CaddyAdmin } from "./caddy-admin.js";
 import type { Config } from "./config.js";
 import { DeployError, Deployer } from "./deploy.js";
+import { HostCheck } from "./host-check.js";
+import { EventTracker, type SubjectKind } from "./events.js";
 import { formatCaddyfile } from "./format.js";
 import { parseHostLines, readHostLog, resolutionKey, resolveHostLogFile } from "./host-logs.js";
 import { LogFollower, tailLines } from "./logs.js";
@@ -16,6 +19,7 @@ import { lastIssuanceError } from "./issuance.js";
 import { summarizeTls } from "./tls.js";
 import { probeEligibility, TlsProber } from "./tls-probe.js";
 import { TlsSweep } from "./tls-sweep.js";
+import { upstreamKey, Watcher } from "./watcher.js";
 
 /** How often a host log stream re-reads the config, and how often it sends a keep-alive. */
 const RESOLVE_CHECK_MS = 3_000;
@@ -28,9 +32,22 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
   await metrics.load();
   metrics.start();
   onShutdown.push(() => metrics.save());
+  const events = new EventTracker({
+    file: join(config.dataDir, "events.json"),
+    sender: parseNtfyUrls(config.ntfyUrl).length > 0 ? new NtfySender(parseNtfyUrls(config.ntfyUrl), { token: config.ntfyToken }) : null,
+    publicUrl: config.publicUrl,
+  });
+  await events.load();
+  events.start();
+  onShutdown.push(() => events.save());
+  const watcher = new Watcher(events, {
+    ping: () => admin.ping(),
+    metricsText: () => admin.metricsText().catch(() => null),
+  });
+  watcher.start();
   const store = new Store(config.dataDir, config.maxRevisions);
   await store.init();
-  const deployer = new Deployer(config.caddyfilePath, admin, store);
+  const deployer = new Deployer(config.caddyfilePath, admin, store, events);
   await deployer.ensureOriginal();
 
   const auth = await createAuth({
@@ -152,20 +169,58 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
     return result.ok ? c.json(result) : c.json(result, 502);
   });
 
+  const listProbeHosts = async () => {
+    const servers = await admin.liveServers();
+    if (!servers.ok) throw new Error(servers.error);
+    const tls = await admin.liveTls();
+    return summarizeTls(servers.servers, tls.ok ? tls.tls : {})
+      .flatMap((site) => site.hosts)
+      .filter((h) => probeEligibility(h.host, h.state) === null)
+      .map((h) => h.host);
+  };
   const prober = new TlsProber({ addr: config.tlsProbeAddr });
   const sweep = new TlsSweep({
     prober,
-    listHosts: async () => {
-      const servers = await admin.liveServers();
-      if (!servers.ok) throw new Error(servers.error);
-      const tls = await admin.liveTls();
-      return summarizeTls(servers.servers, tls.ok ? tls.tls : {})
-        .flatMap((site) => site.hosts)
-        .filter((h) => probeEligibility(h.host, h.state) === null)
-        .map((h) => h.host);
+    listHosts: listProbeHosts,
+    onSwept: (hosts) => {
+      for (const [host, result] of Object.entries(hosts)) {
+        events.observe(`cert:${host}`, result.severity === "ok" ? "ok" : result.severity === "amber" ? "warning" : "down", result.reasons.join("; ") || undefined);
+      }
+      events.sync("cert" satisfies SubjectKind, Object.keys(hosts).map((host) => `cert:${host}`));
     },
   });
   void sweep.start();
+  void new HostCheck({ addr: config.tlsProbeAddr, enabled: config.hostCheck, listHosts: listProbeHosts, events }).start();
+  // History: newest first, optionally for one Subject.
+  app.get("/api/events", (c) => {
+    const subject = c.req.query("subject") || undefined;
+    const limit = Math.min(Math.max(Number(c.req.query("limit")) || 200, 1), 500);
+    return c.json({ ok: true, alerts: events.alertsEnabled, events: events.list({ subject, limit }) });
+  });
+
+  // Per host: the worst State among its Certificate, its synthetic check and its upstreams over a window.
+  app.get("/api/events/timeline", async (c) => {
+    const seconds = Number(c.req.query("window"));
+    const windowMs = (Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 30 * 86_400) : 86_400) * 1000;
+    const servers = await admin.liveServers();
+    if (!servers.ok) return c.json({ ok: false, error: servers.error }, 502);
+    const to = Date.now();
+    const from = to - windowMs;
+    const hosts: Record<string, ReturnType<EventTracker["timeline"]>> = {};
+    for (const site of summarizeRoutes(servers.servers)) {
+      const upstreams = site.rules.flatMap((rule) => rule.destinations.flatMap((d) => d.upstreams ?? [])).map(upstreamKey);
+      for (const host of site.hosts) hosts[host] = events.timeline([`cert:${host}`, `host:${host}`, ...upstreams], from, to);
+    }
+    return c.json({ ok: true, from, to, hosts });
+  });
+
+  // Whether alerting is on, never where it goes.
+  app.get("/api/alerts", (c) => c.json({ ok: true, enabled: events.alertsEnabled }));
+  app.post("/api/alerts/test", async (c) => {
+    const result = await events.sendTest();
+    return c.json(result, result.ok ? 200 : 502);
+  });
+
   app.get("/api/tls/status", (c) => c.json(sweep.snapshot()));
   app.get("/api/tls/probe", async (c) => {
     if (!prober.enabled) return c.json({ ok: true, enabled: false });

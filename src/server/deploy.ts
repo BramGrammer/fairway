@@ -1,5 +1,6 @@
 import { CaddyAdmin, type Warning } from "./caddy-admin.js";
 import { hashText, readCaddyfile, writeInPlace } from "./caddyfile.js";
+import type { EventTracker } from "./events.js";
 import type { RevisionMeta, Store } from "./store.js";
 
 export type DeployFailure =
@@ -38,6 +39,8 @@ export class Deployer {
     private readonly caddyfilePath: string,
     private readonly admin: CaddyAdmin,
     private readonly store: Store,
+    /** Where outcomes worth remembering (a refused reload, an outside edit, a Rollback) are recorded. */
+    private readonly events?: EventTracker,
   ) {}
 
   /** Saves the live file as the Original the first time the editor sees it. */
@@ -77,7 +80,10 @@ export class Deployer {
     const checked = await this.validate(request.text);
     if (!checked.ok) throw new DeployError({ code: "invalid", message: checked.error });
 
-    if (previous.hash !== request.baseHash) await this.keepExternalEdit(previous);
+    if (previous.hash !== request.baseHash) {
+      await this.keepExternalEdit(previous);
+      this.events?.record("external_edit", "The Caddyfile was changed outside Fairway; that version was saved before it was overwritten");
+    }
 
     await writeInPlace(this.caddyfilePath, request.text);
 
@@ -86,13 +92,16 @@ export class Deployer {
       try {
         await writeInPlace(this.caddyfilePath, previous.text);
       } catch (error) {
+        this.events?.record("deploy_failed", "Caddy refused the reload and the previous Caddyfile could not be restored");
         throw new DeployError({
           code: "restore_failed",
           message: `Reload failed (${loaded.error}) and the previous file could not be restored: ${(error as Error).message}`,
         });
       }
+      this.events?.record("deploy_failed", "Caddy refused the reload; the previous Caddyfile was restored");
       throw new DeployError({ code: "load_failed", message: loaded.error });
     }
+    if (request.rollbackOf !== undefined) this.events?.record("rollback", request.note?.trim() || "Rolled back to an earlier Revision");
 
     const latest = this.store.latestDeployed();
     const hash = hashText(request.text);

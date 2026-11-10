@@ -52,6 +52,7 @@ import {
 } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { PRESSED } from "@/lib/toggle-styles"
+import { TimelineStrip } from "@/features/timeline-strip"
 import { RoutesGraph } from "@/features/routes-graph"
 import { normalizeQuery, siteMatches } from "@/features/routes-filter"
 
@@ -140,6 +141,7 @@ function SiteTable({ sites }: { sites: Site[] }) {
           <TableHead className="pl-4">Site</TableHead>
           <TableHead>Path</TableHead>
           <TableHead>Destination</TableHead>
+          <TableHead>Last 24 h</TableHead>
           {showApplied && <TableHead className="pr-4">Also applied here</TableHead>}
         </TableRow>
       </TableHeader>
@@ -176,6 +178,17 @@ function SiteTable({ sites }: { sites: Site[] }) {
                   <span className="text-muted-foreground">No destination</span>
                 )}
               </TableCell>
+              {index === 0 && (
+                <TableCell rowSpan={rules.length} className="align-top">
+                  <div className="flex flex-col gap-1.5 py-2">
+                    {site.hosts.map((host) => (
+                      <div key={host} className="flex h-5 items-center">
+                        <TimelineStrip host={host} compact />
+                      </div>
+                    ))}
+                  </div>
+                </TableCell>
+              )}
               {showApplied && (
                 <TableCell className="pr-4 whitespace-normal">{rule && <Chips chips={rule.middleware} />}</TableCell>
               )}
