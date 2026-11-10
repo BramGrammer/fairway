@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.1](https://github.com/BramGrammer/fairway/compare/v0.3.0...v0.3.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **routes:** hide the visitor details note when login is on ([1a744fa](https://github.com/BramGrammer/fairway/commit/1a744fa3a630dd1cc1ee7365085f25891bee899f))
+* **routes:** newest log lines first, hold the list while reading ([403724d](https://github.com/BramGrammer/fairway/commit/403724d9f33d5e7c24aed6e10c5835cd96fdbb30))
+* **routes:** show newest log lines first and hold the list while reading ([cc10424](https://github.com/BramGrammer/fairway/commit/cc104242a8a75981d13bbed7406130b19beeef7c))
+
 ## [0.3.0](https://github.com/BramGrammer/fairway/compare/v0.2.1...v0.3.0) (2026-11-09)
 
 
