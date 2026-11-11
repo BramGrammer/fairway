@@ -8,6 +8,7 @@ import {
   MoonIcon,
   RouteIcon,
   ScrollTextIcon,
+  SettingsIcon,
   ShieldAlertIcon,
   SunIcon,
   type LucideIcon,
@@ -51,6 +52,7 @@ import { EventsTab } from "@/features/events-tab"
 import { HistoryTab } from "@/features/history-tab"
 import { LogsTab } from "@/features/logs-tab"
 import { RoutesTab } from "@/features/routes-tab"
+import { SettingsDialog } from "@/features/settings-dialog"
 import { useCaddyfile } from "@/hooks/use-caddyfile"
 import { useIsDark } from "@/hooks/use-is-dark"
 import { LoginView } from "@/components/login-form"
@@ -145,6 +147,7 @@ function ThemeMenuItem() {
 function Editor({ user, onLogout }: { user: string | null; onLogout: () => void }) {
   const [view, setView] = useState<View>(initialView)
   const [topBarSlot, setTopBarSlot] = useState<HTMLElement | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const caddyfile = useCaddyfile()
   const status = useStatus()
 
@@ -198,6 +201,12 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
           <StatusBadges status={status} />
           <SidebarMenu>
             <ThemeMenuItem />
+            <SidebarMenuItem>
+              <SidebarMenuButton tooltip="Settings" onClick={() => setSettingsOpen(true)}>
+                <SettingsIcon />
+                <span>Settings</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
           </SidebarMenu>
           {user !== null && <UserMenu user={user} onLogout={onLogout} />}
         </SidebarFooter>
@@ -275,6 +284,7 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
         </div>
         </TopBarSlotProvider>
       </SidebarInset>
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} user={user} />
     </SidebarProvider>
   )
 }

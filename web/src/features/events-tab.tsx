@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { ActivityIcon, ArrowRightIcon, BellIcon, BellOffIcon, SendIcon } from "lucide-react"
 
 import { TopBar } from "@/components/top-bar"
@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
+import { useAlertTest } from "@/hooks/use-alert-test"
 import { api } from "@/lib/api"
 import { formatAge } from "@/lib/age"
 import {
@@ -23,7 +24,6 @@ import {
   filterBySubject,
   subjectLabel,
   subjectsOf,
-  type AlertTestReply,
   type Delivery,
   type EventRecord,
   type EventsReply,
@@ -77,20 +77,8 @@ function Summary({ event }: { event: EventRecord }) {
   return <span>{event.message}</span>
 }
 
-function AlertLine({ enabled, onTest }: { enabled: boolean | null; onTest: () => Promise<AlertTestReply> }) {
-  const [testing, setTesting] = useState(false)
-  const [result, setResult] = useState<AlertTestReply | null>(null)
-
-  const send = async () => {
-    setTesting(true)
-    setResult(null)
-    try {
-      setResult(await onTest())
-    } catch {
-      setResult({ ok: false, error: "Cannot reach the editor server." })
-    }
-    setTesting(false)
-  }
+function AlertLine({ enabled }: { enabled: boolean | null }) {
+  const { testing, result, send } = useAlertTest()
 
   if (enabled === null) return null
   return (
@@ -150,7 +138,6 @@ export function EventsTab() {
     }
   }, [])
 
-  const sendTest = useCallback(async () => (await api<AlertTestReply>("/api/alerts/test", {})).body, [])
 
   const all = useMemo(() => (reply?.ok ? reply.events : []), [reply])
   const subjects = useMemo(() => subjectsOf(all), [all])
@@ -179,7 +166,7 @@ export function EventsTab() {
         </Select>
       </TopBar>
 
-      <AlertLine enabled={reply?.ok ? reply.alerts : null} onTest={sendTest} />
+      <AlertLine enabled={reply?.ok ? reply.alerts : null} />
 
       <div className="min-h-0 flex-1">
         {reply === null ? (
