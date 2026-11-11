@@ -90,21 +90,21 @@ test("bad topics are refused with a reason", async () => {
 
 test("triggers and timing override the defaults and can be reset", async () => {
   const s = new AlertSettings(NONE);
-  assert.equal((await s.patch({ triggers: { rollback: true, cert: false }, timing: { caddyHoldSec: 45 } })).ok, true);
+  assert.equal((await s.patch({ triggers: { rollback: true, caddy: false }, timing: { caddyHoldSec: 45 } })).ok, true);
   let policy = s.effective().policy;
   assert.equal(policy.triggers.rollback, true);
-  assert.equal(policy.triggers.cert, false);
-  assert.equal(policy.triggers.upstream, true);
+  assert.equal(policy.triggers.caddy, false);
+  assert.equal(policy.triggers.deploy_failed, true);
   assert.equal(policy.caddyHoldSec, 45);
   assert.equal(policy.upstreamHoldSec, DEFAULT_POLICY.upstreamHoldSec);
-  assert.deepEqual(s.view(false).triggers.cert, { value: false, overridden: true });
+  assert.deepEqual(s.view(false).triggers.caddy, { value: false, overridden: true });
   assert.deepEqual(s.view(false).timing.caddyHoldSec, { value: 45, default: 15, overridden: true, min: 5, max: 600 });
 
-  await s.patch({ triggers: { cert: null }, timing: { caddyHoldSec: null } });
+  await s.patch({ triggers: { caddy: null }, timing: { caddyHoldSec: null } });
   policy = s.effective().policy;
-  assert.equal(policy.triggers.cert, true);
+  assert.equal(policy.triggers.caddy, true);
   assert.equal(policy.caddyHoldSec, 15);
-  assert.equal(s.view(false).triggers.cert.overridden, false);
+  assert.equal(s.view(false).triggers.caddy.overridden, false);
 });
 
 test("out of range or unknown values change nothing", async () => {
@@ -114,8 +114,11 @@ test("out of range or unknown values change nothing", async () => {
     { timing: { caddyHoldSec: 15.5 } },
     { timing: { flapChanges: 1000 } },
     { timing: { nonsense: 5 } },
-    { triggers: { cert: "yes" } },
+    { triggers: { caddy: "yes" } },
     { triggers: { nonsense: true } },
+    { triggers: { cert: false } }, // chosen per host now
+    { triggers: { upstream: false } },
+    { triggers: { host: false } },
     { publicUrl: "javascript:alert(1)" },
   ]) {
     const result = await s.patch(bad as never);
@@ -164,7 +167,7 @@ test("a refused change is not announced, and a corrupt file is ignored", async (
   const broken = new AlertSettings(ENV, file);
   await broken.load();
   assert.deepEqual(broken.effective().policy, DEFAULT_POLICY);
-  await writeFile(file, JSON.stringify({ version: 1, topics: [{ id: "t_1", name: "ok", url: "https://a.example.test", enabled: true }, { id: "t_2", name: "bad", url: "nope", enabled: true }], timing: { caddyHoldSec: 99999 }, triggers: { cert: "x" } }));
+  await writeFile(file, JSON.stringify({ version: 1, topics: [{ id: "t_1", name: "ok", url: "https://a.example.test", enabled: true }, { id: "t_2", name: "bad", url: "nope", enabled: true }], timing: { caddyHoldSec: 99999 }, triggers: { caddy: "x", cert: false } }));
   await broken.load();
   assert.deepEqual(broken.effective().topics.map((t) => t.id).slice(1), ["t_1"]);
   assert.deepEqual(broken.effective().policy, DEFAULT_POLICY);
@@ -173,9 +176,9 @@ test("a refused change is not announced, and a corrupt file is ignored", async (
 
 test("a failing write is reported and leaves the settings as they were", async () => {
   const s = new AlertSettings(NONE, "/dev/null/impossible/alert-settings.json");
-  const result = await s.patch({ triggers: { cert: false } });
+  const result = await s.patch({ triggers: { caddy: false } });
   assert.equal(result.ok, false);
-  assert.equal(s.effective().policy.triggers.cert, true);
+  assert.equal(s.effective().policy.triggers.caddy, true);
 });
 
 // ---- per host ----

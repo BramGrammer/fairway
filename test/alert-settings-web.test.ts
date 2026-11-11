@@ -27,18 +27,18 @@ test("a number field rejects empty, fractional, negative and out-of-range input"
 })
 
 test("triggers are grouped in display order with their state", () => {
-  const keys: TriggerKey[] = ["cert", "upstream", "caddy", "host", "deploy_failed", "external_edit", "rollback", "recovery", "flapping"]
-  const triggers = Object.fromEntries(keys.map((key) => [key, { value: key !== "rollback", overridden: key === "cert" }])) as Record<TriggerKey, { value: boolean; overridden: boolean }>
+  const keys: TriggerKey[] = ["caddy", "deploy_failed", "external_edit", "rollback", "recovery", "flapping"]
+  const triggers = Object.fromEntries(keys.map((key) => [key, { value: key !== "rollback", overridden: key === "caddy" }])) as Record<TriggerKey, { value: boolean; overridden: boolean }>
   const groups = groupTriggers({ triggers })
-  assert.deepEqual(groups.map((g) => g.title), ["Subjects", "Events", "Messages"])
+  assert.deepEqual(groups.map((g) => g.title), ["Caddy and Fairway", "Messages"])
   assert.deepEqual(groups.flatMap((g) => g.items.map((i) => i.key)), keys)
   assert.equal(groups[0]!.items[0]!.overridden, true)
-  assert.equal(groups[1]!.items[2]!.value, false)
+  assert.equal(groups[0]!.items[3]!.value, false)
 })
 
 test("PUT bodies carry one change, and null resets", () => {
   assert.deepEqual(triggerBody("rollback", true), { triggers: { rollback: true } })
-  assert.deepEqual(triggerBody("cert", null), { triggers: { cert: null } })
+  assert.deepEqual(triggerBody("caddy", null), { triggers: { caddy: null } })
   assert.deepEqual(timingBody("flapChanges", 8), { timing: { flapChanges: 8 } })
   assert.deepEqual(timingBody("flapChanges", null), { timing: { flapChanges: null } })
   assert.deepEqual(publicUrlBody("  https://fairway.example.test "), { publicUrl: "https://fairway.example.test" })

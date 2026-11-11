@@ -1,17 +1,12 @@
 import { useState } from "react"
-import {
-  BellIcon,
-  MonitorIcon,
-  MoonIcon,
-  PaletteIcon,
-  ShieldAlertIcon,
-  ShieldCheckIcon,
-  SunIcon,
-  type LucideIcon,
-} from "lucide-react"
+import { ActivityIcon, BellIcon, SettingsIcon, ShieldAlertIcon, ShieldCheckIcon, type LucideIcon } from "lucide-react"
 
 import { AlertSettingsPanel } from "@/features/alert-settings-panel"
-import { useTheme } from "@/components/theme-provider"
+import { GeneralSettings } from "@/features/general-settings"
+import { MonitoringSettings } from "@/features/monitoring-settings"
+import { ErrorLine } from "@/features/settings-shared"
+import { Spinner } from "@/components/ui/spinner"
+import { useAlertSettings } from "@/hooks/use-alert-settings"
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -33,47 +28,43 @@ import {
   SidebarMenuItem,
   SidebarProvider,
 } from "@/components/ui/sidebar"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { PRESSED } from "@/lib/toggle-styles"
 
-export type SettingsCategory = "appearance" | "alerts" | "access"
+export type SettingsCategory = "general" | "monitoring" | "alerts" | "access"
 
 const CATEGORIES: Array<{ id: SettingsCategory; label: string; icon: LucideIcon; description: string }> = [
-  { id: "appearance", label: "Appearance", icon: PaletteIcon, description: "How Fairway looks in this browser." },
-  { id: "alerts", label: "Alerts", icon: BellIcon, description: "Where Alerts go, and what sends one." },
+  { id: "general", label: "General", icon: SettingsIcon, description: "This Fairway and this browser." },
+  { id: "monitoring", label: "Monitoring", icon: ActivityIcon, description: "When Caddy or an upstream counts as down." },
+  { id: "alerts", label: "Alerts", icon: BellIcon, description: "Where messages go, and what sends one." },
   { id: "access", label: "Access", icon: ShieldCheckIcon, description: "Who can use this Fairway." },
 ]
 
-const THEMES = [
-  { value: "light", label: "Light", icon: SunIcon },
-  { value: "dark", label: "Dark", icon: MoonIcon },
-  { value: "system", label: "System", icon: MonitorIcon },
-] as const
-
-function AppearanceSettings() {
-  const { theme, setTheme } = useTheme()
+function Loading() {
   return (
-    <FieldSet>
-      <FieldLegend>Theme</FieldLegend>
-      <FieldGroup>
-        <ToggleGroup
-          variant="outline"
-          spacing={0}
-          aria-label="Theme"
-          value={[theme]}
-          onValueChange={(value) => value[0] && setTheme(value[0] as (typeof THEMES)[number]["value"])}
-        >
-          {THEMES.map((item) => (
-            <ToggleGroupItem key={item.value} value={item.value} className={PRESSED}>
-              <item.icon data-icon="inline-start" />
-              {item.label}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-        <FieldDescription>System follows your operating system and switches with it. Stored in this browser only.</FieldDescription>
-      </FieldGroup>
-    </FieldSet>
+    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <Spinner /> Loading…
+    </div>
   )
+}
+
+/** The panel of one category. The alert settings are loaded once here and shared by General, Monitoring and Alerts. */
+function CategoryPanel({ active, user }: { active: SettingsCategory; user: string | null }) {
+  const actions = useAlertSettings()
+  const { view, loadError, save } = actions
+
+  if (active === "access") return <AccessSettings user={user} />
+  const failed = loadError && !view && (
+    <div className="flex flex-col items-start gap-2">
+      <ErrorLine message={loadError} />
+      <Button variant="outline" size="sm" onClick={() => void actions.reload()}>
+        Try again
+      </Button>
+    </div>
+  )
+  const waiting = failed || <Loading />
+  if (active === "general") return <GeneralSettings view={view} save={save} loading={waiting} />
+  if (!view) return waiting
+  if (active === "monitoring") return <MonitoringSettings view={view} save={save} />
+  return <AlertSettingsPanel view={view} actions={actions} />
 }
 
 function AccessSettings({ user }: { user: string | null }) {
@@ -118,7 +109,7 @@ export function SettingsDialog({
   open,
   onOpenChange,
   user,
-  initial = "appearance",
+  initial = "general",
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -135,7 +126,7 @@ export function SettingsDialog({
         className="flex h-[85vh] max-h-[640px] max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[820px]"
       >
         <DialogTitle className="sr-only">Settings</DialogTitle>
-        <DialogDescription className="sr-only">Appearance, alerts and access of this Fairway.</DialogDescription>
+        <DialogDescription className="sr-only">General, monitoring, alerts and access of this Fairway.</DialogDescription>
 
         <SidebarProvider className="min-h-0 flex-1 items-stretch">
           <Sidebar collapsible="none" className="hidden w-48 shrink-0 border-r md:flex">
@@ -192,9 +183,7 @@ export function SettingsDialog({
                   <FieldDescription>{current.description}</FieldDescription>
                 </div>
 
-                {active === "appearance" && <AppearanceSettings />}
-                {active === "alerts" && <AlertSettingsPanel />}
-                {active === "access" && <AccessSettings user={user} />}
+                <CategoryPanel active={active} user={user} />
               </div>
             </ScrollArea>
           </main>

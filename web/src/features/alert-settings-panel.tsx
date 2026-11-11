@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react"
+import { Fragment, useState, type FormEvent } from "react"
 import { BellIcon, BellOffIcon, PencilIcon, PlusIcon, SendIcon, Trash2Icon } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -8,43 +8,11 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
-import { useAlertSettings, type Outcome } from "@/hooks/use-alert-settings"
+import { ErrorLine, ResetButton, TimingRow, type Save } from "@/features/settings-shared"
+import type { useAlertSettings, Outcome } from "@/hooks/use-alert-settings"
 import { useAlertTest } from "@/hooks/use-alert-test"
-import {
-  TIMING_FIELDS,
-  describePublicUrl,
-  describeTiming,
-  groupTriggers,
-  parseNumberField,
-  publicUrlBody,
-  timingBody,
-  topicBody,
-  triggerBody,
-  unitFor,
-  type AlertSettingsView,
-  type PutBody,
-  type TopicView,
-} from "@/lib/alert-settings"
+import { TIMING_FIELDS, groupTriggers, topicBody, triggerBody, type AlertSettingsView, type PutBody, type TopicView } from "@/lib/alert-settings"
 import { cn } from "@/lib/utils"
-
-type Save = (body: PutBody) => Promise<Outcome>
-
-function ErrorLine({ message }: { message: string | null }) {
-  if (!message) return null
-  return (
-    <p role="alert" className="text-xs text-destructive">
-      {message}
-    </p>
-  )
-}
-
-function ResetButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
-  return (
-    <Button type="button" variant="ghost" size="sm" onClick={onClick} disabled={disabled}>
-      Reset
-    </Button>
-  )
-}
 
 /** Add or change a saved topic. The address and token are write-only: empty keeps what is stored. */
 function TopicForm({
@@ -286,55 +254,15 @@ function Destinations({ view, actions }: { view: AlertSettingsView; actions: Ret
   )
 }
 
-function PublicAddress({ view, save }: { view: AlertSettingsView["publicUrl"]; save: Save }) {
-  // Remounted by its key when the saved value changes, so the draft always starts from the server's.
-  const [text, setText] = useState(view.value ?? "")
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const lastSent = useRef(view.value ?? "")
-
-  const commit = async () => {
-    if (text.trim() === lastSent.current) return
-    lastSent.current = text.trim()
-    setBusy(true)
-    const outcome = await save(publicUrlBody(text))
-    setBusy(false)
-    if (!outcome.ok) {
-      lastSent.current = view.value ?? ""
-      setError(outcome.error)
-    } else setError(null)
-  }
-  const reset = async () => {
-    setBusy(true)
-    const outcome = await save(publicUrlBody(null))
-    setBusy(false)
-    setError(outcome.ok ? null : outcome.error)
-  }
-
+/** The two timing inputs of flapping, directly under its switch. */
+function FlappingTiming({ view, save }: { view: AlertSettingsView; save: Save }) {
   return (
-    <FieldSet>
-      <FieldLegend>Public address</FieldLegend>
-      <FieldGroup className="gap-2">
-        <div className="flex items-center gap-2">
-          <Input
-            aria-label="Public address"
-            type="url"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => e.key === "Enter" && void commit()}
-            placeholder="https://fairway.example.test"
-            className="max-w-sm font-mono"
-          />
-          <Button variant="outline" size="sm" onClick={commit} disabled={busy || text.trim() === (view.value ?? "")}>
-            Save
-          </Button>
-          {view.overridden && <ResetButton onClick={reset} disabled={busy} />}
-        </div>
-        <ErrorLine message={error} />
-        <FieldDescription>Each message opens Fairway when tapped. {describePublicUrl(view)} Leave empty for no link.</FieldDescription>
-      </FieldGroup>
-    </FieldSet>
+    <div className="flex flex-col divide-y bg-muted/30">
+      <span className="px-3 pt-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Flapping</span>
+      {(["flapChanges", "flapStableMin"] as const).map((key) => (
+        <TimingRow key={`${key}:${view.timing[key].value}`} field={TIMING_FIELDS.find((f) => f.key === key)!} view={view.timing[key]} save={save} />
+      ))}
+    </div>
   )
 }
 
@@ -348,26 +276,29 @@ function Triggers({ view, save }: { view: AlertSettingsView; save: Save }) {
   return (
     <FieldSet>
       <FieldLegend>What sends an Alert</FieldLegend>
-      <p className="text-sm text-muted-foreground">These apply to every host. Choose which hosts send Alerts on the Routes page.</p>
+      <p className="text-sm text-muted-foreground">Which hosts send Alerts, and for what, is chosen on the Routes page.</p>
       <FieldGroup className="gap-4">
         {groupTriggers(view).map((group) => (
           <div key={group.title} className="flex flex-col gap-1">
             <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{group.title}</span>
-            <div className="flex flex-col divide-y rounded-lg border">
+            <div className="flex flex-col divide-y overflow-hidden rounded-lg border">
               {group.items.map((item) => (
-                <div key={item.key} className="flex items-center gap-3 px-3 py-2.5">
-                  <Switch size="sm" checked={item.value} onCheckedChange={(value) => run(triggerBody(item.key, value))} aria-label={item.label} />
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="text-sm">{item.label}</span>
-                    {item.description && <span className="text-xs text-muted-foreground">{item.description}</span>}
+                <Fragment key={item.key}>
+                  <div className="flex items-center gap-3 px-3 py-2.5">
+                    <Switch size="sm" checked={item.value} onCheckedChange={(value) => run(triggerBody(item.key, value))} aria-label={item.label} />
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <span className="text-sm">{item.label}</span>
+                      {item.description && <span className="text-xs text-muted-foreground">{item.description}</span>}
+                    </div>
+                    {item.overridden && (
+                      <>
+                        <Badge variant="outline">Changed</Badge>
+                        <ResetButton onClick={() => run(triggerBody(item.key, null))} />
+                      </>
+                    )}
                   </div>
-                  {item.overridden && (
-                    <>
-                      <Badge variant="outline">Changed</Badge>
-                      <ResetButton onClick={() => run(triggerBody(item.key, null))} />
-                    </>
-                  )}
-                </div>
+                  {item.key === "flapping" && <FlappingTiming view={view} save={save} />}
+                </Fragment>
               ))}
             </div>
           </div>
@@ -378,96 +309,12 @@ function Triggers({ view, save }: { view: AlertSettingsView; save: Save }) {
   )
 }
 
-function TimingRow({ field, view, save }: { field: (typeof TIMING_FIELDS)[number]; view: AlertSettingsView["timing"][typeof field.key]; save: Save }) {
-  const [text, setText] = useState(String(view.value))
-  const [error, setError] = useState<string | null>(null)
-  const lastSent = useRef(view.value)
-  const id = `timing-${field.key}`
-
-  const commit = async () => {
-    const parsed = parseNumberField(text, view.min, view.max)
-    if (!parsed.ok) return setError(parsed.error)
-    if (parsed.value === lastSent.current) return setError(null)
-    lastSent.current = parsed.value
-    const outcome = await save(timingBody(field.key, parsed.value))
-    if (!outcome.ok) lastSent.current = view.value
-    setError(outcome.ok ? null : outcome.error)
-  }
-  const reset = async () => {
-    const outcome = await save(timingBody(field.key, null))
-    if (outcome.ok) {
-      lastSent.current = view.default
-      setText(String(view.default))
-    }
-    setError(outcome.ok ? null : outcome.error)
-  }
-
-  return (
-    <div className="flex flex-col gap-1 px-3 py-2.5">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <Label htmlFor={id} className="font-normal">
-          {field.before}
-        </Label>
-        <Input
-          id={id}
-          inputMode="numeric"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onBlur={commit}
-          onKeyDown={(e) => e.key === "Enter" && void commit()}
-          aria-invalid={error !== null}
-          className="w-20 text-right tabular-nums"
-        />
-        <span>{unitFor(field, Number(text) || view.value)}</span>
-        <span>{field.after}</span>
-        {view.overridden && <ResetButton onClick={reset} />}
-      </div>
-      {error ? <ErrorLine message={error} /> : <span className="text-xs text-muted-foreground">{describeTiming(field, view)}</span>}
-    </div>
-  )
-}
-
-function Timing({ view, save }: { view: AlertSettingsView; save: Save }) {
-  return (
-    <FieldSet>
-      <FieldLegend>Timing</FieldLegend>
-      <FieldGroup>
-        <div className="flex flex-col divide-y rounded-lg border">
-          {TIMING_FIELDS.map((field) => (
-            <TimingRow key={`${field.key}:${view.timing[field.key].value}`} field={field} view={view.timing[field.key]} save={save} />
-          ))}
-        </div>
-      </FieldGroup>
-    </FieldSet>
-  )
-}
-
-/** The Alerts category of the settings: where messages go, what sends one, and how patient Fairway is. */
-export function AlertSettingsPanel() {
-  const actions = useAlertSettings()
-  const { view, loadError, save } = actions
-
-  if (!view) {
-    return loadError ? (
-      <div className="flex flex-col items-start gap-2">
-        <ErrorLine message={loadError} />
-        <Button variant="outline" size="sm" onClick={() => void actions.reload()}>
-          Try again
-        </Button>
-      </div>
-    ) : (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Spinner /> Loading…
-      </div>
-    )
-  }
-
+/** The Alerts category of the settings: where messages go and what sends one. */
+export function AlertSettingsPanel({ view, actions }: { view: AlertSettingsView; actions: ReturnType<typeof useAlertSettings> }) {
   return (
     <div className="flex flex-col gap-8">
       <Destinations view={view} actions={actions} />
-      <PublicAddress key={view.publicUrl.value ?? ""} view={view.publicUrl} save={save} />
-      <Triggers view={view} save={save} />
-      <Timing view={view} save={save} />
+      <Triggers view={view} save={actions.save} />
     </div>
   )
 }

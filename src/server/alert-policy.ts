@@ -1,10 +1,11 @@
 /** What sends an Alert and how long things must hold, as the Owner can set them. */
 
-export const TRIGGER_KEYS = ["cert", "upstream", "caddy", "host", "deploy_failed", "external_edit", "rollback", "recovery", "flapping"] as const;
+/** What sends an Alert regardless of host. Certificates, upstreams and the host check are chosen per host instead. */
+export const TRIGGER_KEYS = ["caddy", "deploy_failed", "external_edit", "rollback", "recovery", "flapping"] as const;
 export type TriggerKey = (typeof TRIGGER_KEYS)[number];
 
 export interface AlertPolicy {
-  /** Which occurrences send an Alert. `recovery` and `flapping` apply on top of the kind of Subject. */
+  /** Which occurrences send an Alert. `recovery` and `flapping` apply on top of the occurrence itself. */
   triggers: Record<TriggerKey, boolean>;
   /** How long Caddy must fail to answer before it counts as down. */
   caddyHoldSec: number;
@@ -28,10 +29,7 @@ export const TIMING_LIMITS: Record<TimingKey, { min: number; max: number }> = {
 
 export const DEFAULT_POLICY: AlertPolicy = {
   triggers: {
-    cert: true,
-    upstream: true,
     caddy: true,
-    host: true,
     deploy_failed: true,
     external_edit: true,
     rollback: false, // you just did it yourself

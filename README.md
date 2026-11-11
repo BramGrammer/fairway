@@ -107,9 +107,9 @@ Alerts are push messages through [ntfy](https://ntfy.sh). Set `NTFY_URL` to the 
 These variables are the defaults. **Settings › Alerts** changes them without a restart and keeps your changes in `alert-settings.json` in `DATA_DIR`, where they win until you reset them:
 
 - **Topics:** add more, each with its own token, switch each on or off and send a test to one. Topics from the environment can be switched off but not edited or removed. Addresses and tokens are never shown again after you save them.
-- **What sends an Alert:** a switch for each kind of Subject, for a refused Deploy, an outside edit, a Rollback (off by default), for recovery messages and for the flapping message.
-- **Timing:** how long Caddy and upstreams must fail before they count as down, and the flapping limits.
-- **Public address:** `PUBLIC_URL` is its default.
+- **What sends an Alert** (Settings › Alerts): a switch for Caddy not answering, a refused Deploy, an outside edit and a Rollback (off by default), plus recovery messages and the flapping message with its limits.
+- **How long a problem must last** (Settings › Monitoring): how long Caddy and upstreams must fail before they count as down. A shorter blip never shows in the history or sends an Alert.
+- **Public address** (Settings › General): `PUBLIC_URL` is its default. It makes each message open Fairway when tapped.
 - **Which hosts send Alerts:** none do until you switch them on, in the route drawer on the Routes page. A host's switch has a menu to pick what it sends for (its Certificate, the host check, the upstreams it uses) and to snooze it for an hour or a day. An upstream shared by several hosts alerts while any of them is on, and its message names them. Caddy itself, a refused Deploy and an outside edit are not about a host and follow the switches above. A host that leaves the Caddyfile keeps its settings. Muted hosts are still watched: the history and timeline record everything.
 - Adding, changing or removing a topic address or token needs login (see [Login](#login)); without it only the switches, the timing and switching topics on or off can be changed. Anyone who can reach an open Fairway could otherwise point its requests anywhere.
 

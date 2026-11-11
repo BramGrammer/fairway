@@ -1,15 +1,6 @@
 /** The view of the alert settings the server returns, and the pure helpers around it. Copied, not imported, from the server. */
 
-export type TriggerKey =
-  | "cert"
-  | "upstream"
-  | "caddy"
-  | "host"
-  | "deploy_failed"
-  | "external_edit"
-  | "rollback"
-  | "recovery"
-  | "flapping"
+export type TriggerKey = "caddy" | "deploy_failed" | "external_edit" | "rollback" | "recovery" | "flapping"
 export type TimingKey = "caddyHoldSec" | "upstreamHoldSec" | "flapChanges" | "flapStableMin"
 
 export interface TopicView {
@@ -74,17 +65,9 @@ export const TRIGGER_GROUPS: Array<{
   items: Array<{ key: TriggerKey; label: string; description?: string }>
 }> = [
   {
-    title: "Subjects",
+    title: "Caddy and Fairway",
     items: [
-      { key: "cert", label: "A Certificate turns amber or red" },
-      { key: "upstream", label: "An upstream goes down" },
       { key: "caddy", label: "Caddy stops answering" },
-      { key: "host", label: "A host fails the host check" },
-    ],
-  },
-  {
-    title: "Events",
-    items: [
       { key: "deploy_failed", label: "Caddy refuses a Deploy" },
       { key: "external_edit", label: "The Caddyfile is changed outside Fairway" },
       { key: "rollback", label: "A Rollback is done", description: "Off by default, you just did it." },

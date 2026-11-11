@@ -171,7 +171,7 @@ test("a topic from the environment can be switched off and on, and tested on its
 test("bad values are refused with a reason and change nothing", async () => {
   const r = await rig({ login: true });
   try {
-    for (const body of [{ timing: { caddyHoldSec: 1 } }, { triggers: { cert: "yes" } }, { publicUrl: "javascript:alert(1)" }]) {
+    for (const body of [{ timing: { caddyHoldSec: 1 } }, { triggers: { caddy: "yes" } }, { triggers: { cert: false } }, { publicUrl: "javascript:alert(1)" }]) {
       const res = await r.json("PUT", "/api/settings/alerts", body);
       assert.equal(res.status, 400);
       assert.equal(res.body.ok, false);

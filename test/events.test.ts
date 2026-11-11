@@ -270,18 +270,18 @@ const policy = (over: Partial<AlertPolicy> & { triggers?: Partial<AlertPolicy["t
   triggers: { ...DEFAULT_POLICY.triggers, ...over.triggers },
 });
 
-test("a kind of Subject switched off is recorded but never alerted", async () => {
+test("Caddy switched off is recorded but never alerted; hosts are chosen by the scope, not by a global switch", async () => {
   const { sent, sender } = fakeSender();
   const t = new EventTracker({ sender });
-  t.configure({ policy: policy({ triggers: { cert: false } }) });
+  t.configure({ policy: policy({ triggers: { caddy: false } }) });
   t.observe("cert:a.test", "ok", undefined, T0);
   t.observe("cert:a.test", "down", "expired", T0 + MIN);
   t.observe("caddy", "ok", undefined, T0);
   t.observe("caddy", "down", undefined, T0 + MIN);
   t.observe("caddy", "down", undefined, T0 + 2 * MIN);
   await t.flush();
-  assert.equal(t.stateOf("cert:a.test"), "down");
-  assert.deepEqual(sent.map((p) => p.subject), ["caddy"]);
+  assert.equal(t.stateOf("caddy"), "down");
+  assert.deepEqual(sent.map((p) => p.subject), ["cert:a.test"]);
 });
 
 test("with recovery messages off only the bad States are sent", async () => {

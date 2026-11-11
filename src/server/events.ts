@@ -170,6 +170,11 @@ export class EventTracker {
     if (settings.policy) this.policy = settings.policy;
   }
 
+  /** Whether this kind of Subject may send Alerts at all. Only Caddy has a global switch; hosts are chosen one by one. */
+  private sends(subject: string): boolean {
+    return subjectKind(subject) === "caddy" ? this.policy.triggers.caddy : true;
+  }
+
   private holdMs(subject: string): number {
     switch (subjectKind(subject)) {
       case "caddy":
@@ -381,7 +386,7 @@ export class EventTracker {
     this.subjects.set(subject, current);
 
     if (state === "ok" && previous === null) return; // the first sighting of a healthy Subject is not news
-    if (!this.policy.triggers[subjectKind(subject)]) return;
+    if (!this.sends(subject)) return;
     const scope = this.scope?.(subject, now) ?? { send: true };
     if (!scope.send) return;
     if (current.muted) return;
@@ -404,7 +409,7 @@ export class EventTracker {
     current.muted = false;
     const message = `${describe(subject, current.state, null)} (settled)`;
     const event = this.add({ at: now, kind: "flapping", subject, state: current.state, message });
-    if (this.policy.triggers.flapping && this.policy.triggers[subjectKind(subject)] && (this.scope?.(subject, now) ?? { send: true }).send) {
+    if (this.policy.triggers.flapping && this.sends(subject) && (this.scope?.(subject, now) ?? { send: true }).send) {
       this.alert(event, { event: "flapping", subject, state: current.state, previous: null, since: current.since, message });
     }
   }
