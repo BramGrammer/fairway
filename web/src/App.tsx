@@ -55,22 +55,18 @@ import { LoginView } from "@/components/login-form"
 import { UserMenu } from "@/components/user-menu"
 import { api, onSessionLost, type StatusInfo } from "@/lib/api"
 import { LoginRequiredContext } from "@/lib/login-context"
+import { RouterProvider } from "@/components/router-provider"
+import { useRouter } from "@/hooks/use-router"
+import { pageTitle, type Page } from "@/lib/router"
 import { decideGate, type AuthStatus, type Gate } from "@/lib/auth"
 
-type View = "editor" | "routes" | "history" | "events" | "logs"
-
-const NAV: { id: View; label: string; icon: LucideIcon }[] = [
+const NAV: { id: Page; label: string; icon: LucideIcon }[] = [
   { id: "editor", label: "Editor", icon: FileCodeIcon },
   { id: "routes", label: "Routes", icon: RouteIcon },
   { id: "history", label: "History", icon: HistoryIcon },
   { id: "events", label: "Events", icon: ActivityIcon },
   { id: "logs", label: "Logs", icon: ScrollTextIcon },
 ]
-
-function initialView(): View {
-  const hash = window.location.hash.slice(1)
-  return NAV.some((item) => item.id === hash) ? (hash as View) : "editor"
-}
 
 function useStatus() {
   const [status, setStatus] = useState<StatusInfo | null>(null)
@@ -140,17 +136,16 @@ function NoAuthAlert() {
 }
 
 function Editor({ user, onLogout }: { user: string | null; onLogout: () => void }) {
-  const [view, setView] = useState<View>(initialView)
+  const { page: view, params, navigate, openPanel, replaceParams, closePanel, linkProps } = useRouter()
   const [topBarSlot, setTopBarSlot] = useState<HTMLElement | null>(null)
   const [titleSlot, setTitleSlot] = useState<HTMLElement | null>(null)
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const caddyfile = useCaddyfile()
   const status = useStatus()
 
-  useEffect(() => onShowInEditor(() => setView("editor")), [])
+  useEffect(() => onShowInEditor(() => navigate("editor")), [navigate])
 
   useEffect(() => {
-    window.history.replaceState(null, "", `#${view}`)
+    document.title = pageTitle(view)
   }, [view])
 
   const current = NAV.find((item) => item.id === view)!
@@ -188,7 +183,7 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
                     <SidebarMenuButton
                       isActive={view === item.id}
                       tooltip={item.label}
-                      onClick={() => setView(item.id)}
+                      render={<a {...linkProps(item.id)} />}
                     >
                       <item.icon />
                       <span>{item.label}</span>
@@ -207,7 +202,7 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
           {status?.auth.mode === "none" && <NoAuthAlert />}
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton tooltip="Settings" onClick={() => setSettingsOpen(true)}>
+              <SidebarMenuButton tooltip="Settings" onClick={() => openPanel({ settings: "general" })}>
                 <SettingsIcon />
                 <span>Settings</span>
               </SidebarMenuButton>
@@ -273,7 +268,7 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
               dirty={caddyfile.dirty}
               onLoadIntoEditor={(text) => {
                 caddyfile.setText(text)
-                setView("editor")
+                navigate("editor")
               }}
               onRolledBack={caddyfile.load}
             />
@@ -292,13 +287,18 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
         </TopBarTitleSlotProvider>
         </TopBarSlotProvider>
       </SidebarInset>
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} user={user} />
+      <SettingsDialog
+        category={params.settings ?? null}
+        onCategoryChange={(settings) => replaceParams({ settings })}
+        onClose={() => closePanel(["settings"])}
+        user={user}
+      />
     </SidebarProvider>
   )
 }
 
 /** Decides between the login view and the editor. The editor remounts after a sign in, so unsaved text is dropped. */
-export default function App() {
+function Gate() {
   const [gate, setGate] = useState<Gate | "loading">("loading")
 
   const check = useCallback(async () => {
@@ -334,5 +334,13 @@ export default function App() {
     <LoginRequiredContext value={gate.user !== null}>
       <Editor user={gate.user} onLogout={() => void logout()} />
     </LoginRequiredContext>
+  )
+}
+
+export default function App() {
+  return (
+    <RouterProvider>
+      <Gate />
+    </RouterProvider>
   )
 }

@@ -42,6 +42,7 @@ import {
   type RoutesReply,
   type Site,
 } from "@/lib/api"
+import { useRouter } from "@/hooks/use-router"
 import { cn } from "@/lib/utils"
 import { PRESSED } from "@/lib/toggle-styles"
 import { RoutesTable } from "@/features/routes-table"
@@ -51,6 +52,8 @@ import { normalizeQuery, siteMatches } from "@/features/routes-filter"
 
 type Source = "running" | "editor"
 type Grouping = "graph" | "site" | "upstream"
+
+const GROUP_PARAM = { graph: undefined, site: "table", upstream: "destination" } as const
 
 interface RoutesTabProps {
   /** The editor's current text, shown when the source is "Editor". */
@@ -149,9 +152,14 @@ function UpstreamTable({ sites }: { sites: Site[] }) {
 }
 
 export function RoutesTab({ editorText }: RoutesTabProps) {
-  const [source, setSource] = useState<Source>("running")
-  const [grouping, setGrouping] = useState<Grouping>("graph")
-  const [search, setSearch] = useState("")
+  // View state lives in the URL, so a reload or a pasted link shows the same thing.
+  const { params, replaceParams } = useRouter()
+  const source: Source = params.source ?? "running"
+  const grouping: Grouping = params.group === "table" ? "site" : params.group === "destination" ? "upstream" : "graph"
+  const search = params.q ?? ""
+  const setSource = (value: Source) => replaceParams({ source: value === "editor" ? "editor" : undefined })
+  const setGrouping = (value: Grouping) => replaceParams({ group: GROUP_PARAM[value] })
+  const setSearch = (value: string) => replaceParams({ q: value })
   const [refresh, setRefresh] = useState(0)
   const [result, setResult] = useState<{ key: string; sites: Site[]; error: string | null } | null>(null)
 

@@ -1,6 +1,7 @@
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createAuth, parseTrustProxy } from "./auth.js";
 import { AlertSettings, type Patch, type RouteMap, type TopicPatch } from "./alert-settings.js";
@@ -378,5 +379,19 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
   );
 
   app.use("/*", serveStatic({ root: config.webRoot }));
+
+  // Single-page app: a page address that matched no file gets the shell, so the browser router can take over.
+  // /api, other methods and anything whose last segment has a dot (an asset) keep their plain 404.
+  app.use("/*", async (c, next) => {
+    const path = c.req.path;
+    const isPage = (c.req.method === "GET" || c.req.method === "HEAD") && path !== "/api" && !path.startsWith("/api/") && !(path.split("/").pop() ?? "").includes(".");
+    if (!isPage) return next();
+    try {
+      const html = await readFile(join(config.webRoot, "index.html"), "utf8");
+      return c.html(html, 200, { "Cache-Control": "no-cache" });
+    } catch {
+      return next();
+    }
+  });
   return app;
 }

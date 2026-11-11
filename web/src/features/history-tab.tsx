@@ -31,6 +31,7 @@ import {
   type RevisionId,
   type RevisionMeta,
 } from "@/lib/api"
+import { useRouter } from "@/hooks/use-router"
 import { cn } from "@/lib/utils"
 
 interface HistoryTabProps {
@@ -70,7 +71,11 @@ function toEntries(revisions: RevisionMeta[], hasOriginal: boolean): Entry[] {
 
 export function HistoryTab({ dirty, onLoadIntoEditor, onRolledBack }: HistoryTabProps) {
   const [entries, setEntries] = useState<Entry[] | null>(null)
-  const [selected, setSelected] = useState<{ entry: Entry; text: string } | null>(null)
+  const { params, openPanel, replaceParams, closePanel } = useRouter()
+  const revision = params.revision
+  const [loaded, setLoaded] = useState<{ entry: Entry; text: string } | null>(null)
+  // Only a revision that the URL names is shown; the URL is the source of truth.
+  const selected = loaded && String(loaded.entry.id) === revision ? loaded : null
   const [live, setLive] = useState<CaddyfileState | null>(null)
   const [rollbackOpen, setRollbackOpen] = useState(false)
   const [conflictText, setConflictText] = useState<string | null>(null)
@@ -93,13 +98,27 @@ export function HistoryTab({ dirty, onLoadIntoEditor, onRolledBack }: HistoryTab
     }
   }, [])
 
-  async function select(entry: Entry) {
-    const [revision, current] = await Promise.all([
-      api<{ text: string }>(`/api/revisions/${entry.id}`),
-      api<CaddyfileState>("/api/caddyfile"),
-    ])
-    setSelected({ entry, text: revision.body.text })
-    setLive(current.body)
+  useEffect(() => {
+    const entry = revision === undefined ? undefined : entries?.find((item) => String(item.id) === revision)
+    if (!entry) return
+    let active = true
+    Promise.all([api<{ text: string }>(`/api/revisions/${entry.id}`), api<CaddyfileState>("/api/caddyfile")]).then(
+      ([text, current]) => {
+        if (!active) return
+        setLoaded({ entry, text: text.body.text })
+        setLive(current.body)
+      }
+    )
+    return () => {
+      active = false
+    }
+  }, [revision, entries])
+
+  /** Opening a revision pushes an entry, so Back closes it; moving to another one replaces. */
+  function select(entry: Entry) {
+    const next = { revision: String(entry.id) }
+    if (revision === undefined) openPanel(next)
+    else replaceParams(next)
   }
 
   async function rollback(force: boolean) {
@@ -119,7 +138,7 @@ export function HistoryTab({ dirty, onLoadIntoEditor, onRolledBack }: HistoryTab
       })
       await onRolledBack()
       await loadEntries()
-      setSelected(null)
+      closePanel(["revision"])
       return
     }
     if (body.code === "conflict") {
@@ -160,7 +179,7 @@ export function HistoryTab({ dirty, onLoadIntoEditor, onRolledBack }: HistoryTab
                 <Button
                   key={entry.id}
                   variant="ghost"
-                  onClick={() => void select(entry)}
+                  onClick={() => select(entry)}
                   className={cn(
                     "h-auto w-full flex-col items-start gap-0.5 rounded-none border-b-border px-4 py-2.5 text-left whitespace-normal hover:bg-secondary",
                     selected?.entry.id === entry.id &&

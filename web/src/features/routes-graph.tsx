@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   ArrowRightIcon,
   ChevronDownIcon,
@@ -21,6 +21,7 @@ import { Toggle } from "@/components/ui/toggle"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { GraphCanvas, type CanvasHandle } from "@/features/graph-canvas"
+import { useRouter } from "@/hooks/use-router"
 import { RouteDrawer } from "@/features/route-drawer"
 import { StepNode } from "@/features/step-node"
 import { TlsTab } from "@/features/tls-tab"
@@ -582,7 +583,24 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
   const base = useMemo(() => arrange(raw, raw.paths), [raw])
 
   const [manualExpanded, setExpanded] = useState<Set<string>>(() => new Set())
-  const [pinned, setPinned] = useState<string | null>(null)
+  // The open drawer is kept in the URL (?node=...); a node that no longer exists is ignored.
+  const { params, openPanel, replaceParams, closePanel } = useRouter()
+  const nodeParam = params.node
+  const pinned =
+    nodeParam !== undefined &&
+    (raw.hosts.has(nodeParam) ||
+      raw.handlers.has(nodeParam) ||
+      raw.steps.has(nodeParam) ||
+      raw.dests.has(nodeParam) ||
+      [...base.hostGroups, ...base.destGroups].some((group) => group.id === nodeParam))
+      ? nodeParam
+      : null
+  /** Opening the drawer pushes a history entry, so Back closes it; moving to another node replaces. */
+  const setPinned = (id: string | null) => {
+    if (id === null) closePanel(["node"])
+    else if (nodeParam === undefined) openPanel({ node: id })
+    else if (id !== nodeParam) replaceParams({ node: id })
+  }
   /** Open groups that show every member instead of folding the rest into a "more" row. */
   const [showAll, setShowAll] = useState<Set<string>>(() => new Set())
   const [hovered, setHovered] = useState<string | null>(null)
@@ -934,10 +952,10 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
     setPinned(id)
   }
 
-  const closeDrawer = useCallback(() => {
+  const closeDrawer = () => {
     setPinned(null)
     setIsolate(false)
-  }, [])
+  }
 
   // The drawer covers the right of the canvas, so pan the selected node out from under it.
   useEffect(() => {
