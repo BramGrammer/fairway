@@ -85,6 +85,19 @@ export function editorTheme(dark: boolean) {
         ".cm-gutter-lint": { width: "1.2em" },
         // The icon sits on the middle of its line, not on the text baseline.
         ".cm-gutter-lint .cm-gutterElement": { display: "flex", alignItems: "center", justifyContent: "center" },
+        // Other occurrences of the selected word.
+        ".cm-selectionMatch": {
+          backgroundColor: "color-mix(in oklch, var(--foreground) 14%, transparent)",
+          borderRadius: "2px",
+        },
+        // Matches of the find bar; the selected one stands out.
+        ".cm-searchMatch": {
+          backgroundColor: "color-mix(in oklch, var(--primary) 22%, transparent)",
+          borderRadius: "2px",
+        },
+        ".cm-searchMatch.cm-searchMatch-selected": {
+          backgroundColor: "color-mix(in oklch, var(--primary) 50%, transparent)",
+        },
         ".cm-tooltip": {
           backgroundColor: "var(--popover)",
           color: "var(--popover-foreground)",

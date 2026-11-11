@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
 import { XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -36,6 +36,21 @@ export function SideDrawer({ label, title, actions, tabs, flush = false, onClose
   const resize = useCallback((next: number) => {
     const parent = ref.current?.parentElement?.clientWidth ?? window.innerWidth
     setWidth(clampDrawerWidth(next, parent))
+  }, [])
+
+  // Tells whatever else sits over the same area how much of its right edge the drawer covers, so it can stay clear.
+  useLayoutEffect(() => {
+    const drawer = ref.current
+    const parent = drawer?.parentElement
+    if (!drawer || !parent) return
+    const publish = () => parent.style.setProperty("--side-drawer-width", `${drawer.offsetWidth}px`)
+    publish()
+    const observer = new ResizeObserver(publish)
+    observer.observe(drawer)
+    return () => {
+      observer.disconnect()
+      parent.style.removeProperty("--side-drawer-width")
+    }
   }, [])
 
   useEffect(() => {
