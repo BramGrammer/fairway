@@ -26,7 +26,6 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -224,9 +223,7 @@ export function RoutesTab({ editorText }: RoutesTabProps) {
             {grouping === "graph" ? (
               <RoutesGraph sites={sites} query={query} />
             ) : (
-              <ScrollArea className="h-full">
-                <RoutesTable sites={sites} editorText={editorText} summary={summary} />
-              </ScrollArea>
+              <RoutesTable sites={sites} editorText={editorText} summary={summary} />
             )}
           </div>
         )}

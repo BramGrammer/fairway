@@ -295,12 +295,14 @@ export function RoutesTable({
   })
 
   return (
-    <div className="flex flex-col">
-      <div className="flex h-10 items-center justify-between gap-2 border-b px-4">
+    <div className="flex h-full flex-col">
+      <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b px-4">
         {summary}
         <DataTableViewOptions table={table} titles={TITLES} />
       </div>
-      <DataTable table={table} empty="No routes." />
+      <ScrollArea className="min-h-0 flex-1">
+        <DataTable table={table} empty="No routes." />
+      </ScrollArea>
     </div>
   )
 }
