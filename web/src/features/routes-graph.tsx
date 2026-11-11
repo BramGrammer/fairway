@@ -1,15 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
-  ArrowRightIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   ChevronsDownUpIcon,
   ChevronsUpDownIcon,
-  CircleQuestionMarkIcon,
-  CornerDownRightIcon,
-  FolderIcon,
   InfoIcon,
-  MessageSquareIcon,
   PinIcon,
   XIcon,
 } from "lucide-react"
@@ -17,8 +12,7 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
-import { ToolbarAction } from "@/components/toolbar-action"
+import { ToolbarAction, ToolbarDivider } from "@/components/toolbar-action"
 import { Toggle } from "@/components/ui/toggle"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -29,6 +23,7 @@ import { StepNode } from "@/features/step-node"
 import { TlsTab } from "@/features/tls-tab"
 import { TrafficTab } from "@/features/traffic-tab"
 import { RouteOverview } from "@/features/route-overview-view"
+import { DEST_ICONS, hostLabel, isDomain } from "@/features/routes-shared"
 import { useMetrics } from "@/hooks/use-metrics"
 import { useUpstreamHealth } from "@/hooks/use-upstream-health"
 import { HealthDot } from "@/features/health-dot"
@@ -48,14 +43,6 @@ import { estimateTraffic, mergeStats, trafficContributions } from "@/lib/traffic
 import { chipTexts, destTexts, hostTexts, matchesQuery } from "@/features/routes-filter"
 import { PRESSED } from "@/lib/toggle-styles"
 import { cn } from "@/lib/utils"
-
-const DEST_ICONS = {
-  proxy: ArrowRightIcon,
-  file: FolderIcon,
-  redirect: CornerDownRightIcon,
-  respond: MessageSquareIcon,
-  other: CircleQuestionMarkIcon,
-} as const
 
 const PAD = 16
 const SIDE_W = 240
@@ -139,8 +126,6 @@ interface Arranged {
 }
 
 const isHostNode = (id: string) => id.startsWith("host:") || id.startsWith("host-group:")
-const hostLabel = (host: string) => (host === "*" ? "any host" : host)
-const isDomain = (host: string) => /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host)
 const isInternal = (site: Site) => site.hosts.some((host) => host.includes(".int."))
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
@@ -580,11 +565,6 @@ const quiet = (percent: number) => `color-mix(in oklab, var(--muted-foreground) 
 
 const edgeWidth = (count: number) => clamp(1.25 + Math.sqrt(count) * 1.1, 1.25, 9)
 
-/** A thin vertical line between the groups of a toolbar row. */
-function Divider() {
-  return <Separator orientation="vertical" className="mx-1 data-vertical:h-6 data-vertical:self-auto" />
-}
-
 export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: string }) {
   const raw = useMemo(() => buildRaw(sites), [sites])
   const base = useMemo(() => arrange(raw, raw.paths), [raw])
@@ -1001,7 +981,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
         >
           {allOpen ? <ChevronsDownUpIcon /> : <ChevronsUpDownIcon />}
         </ToolbarAction>
-        <Divider />
+        <ToolbarDivider />
         <ToggleGroup
           variant="outline"
           spacing={0}
@@ -1018,7 +998,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
         </ToggleGroup>
         {live && (
           <>
-            <Divider />
+            <ToolbarDivider />
             <ToggleGroup
               variant="outline"
               spacing={0}
@@ -1032,7 +1012,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
                 </ToggleGroupItem>
               ))}
             </ToggleGroup>
-            <Divider />
+            <ToolbarDivider />
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <span className="size-1.5 animate-pulse rounded-full bg-primary" />
               Live · {fmtRate(Object.values(live.hosts).reduce((sum, h) => sum + h.rate, 0))} ·{" "}

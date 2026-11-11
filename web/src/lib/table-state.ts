@@ -39,3 +39,23 @@ export function parsePersistedTable<Id extends string>(
   }
   return out
 }
+
+/** The stored table state under `key`; a missing, unreadable or unavailable entry gives an empty one. */
+export function loadTableState<Id extends string>(
+  key: string,
+  parse: (raw: string | null) => PersistedTableOf<Id>,
+): PersistedTableOf<Id> {
+  try {
+    return parse(localStorage.getItem(key))
+  } catch {
+    return parse(null)
+  }
+}
+
+export function saveTableState(key: string, sorting: unknown, visibility: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify({ sorting, visibility }))
+  } catch {
+    // Storage may be unavailable; the table still works.
+  }
+}

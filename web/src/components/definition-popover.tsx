@@ -5,6 +5,7 @@ import { CodeBlock } from "@/components/code-block"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { useCopy } from "@/hooks/use-copy"
 import { requestShowInEditor } from "@/lib/show-in-editor"
 import { siteDefinition } from "@/lib/site-definition"
 import { cn } from "@/lib/utils"
@@ -14,7 +15,8 @@ interface DefinitionPopoverProps {
   children: ReactNode
   title: string
   host: string
-  editorText: string
+  /** Reads the Caddyfile text; called when the popover opens, so the caller needs no re-render per keystroke. */
+  getEditorText: () => string
   /** Shown above the definition (e.g. the upstream addresses). */
   intro?: ReactNode
   /** Shown instead of the Caddyfile excerpt when the editor has no block for the host. */
@@ -31,7 +33,7 @@ export function DefinitionPopover({
   children,
   title,
   host,
-  editorText,
+  getEditorText,
   intro,
   fallback,
   copyText,
@@ -39,21 +41,17 @@ export function DefinitionPopover({
   className,
 }: DefinitionPopoverProps) {
   const [open, setOpen] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const definition = open ? siteDefinition(editorText, host) : null
+  const [definition, setDefinition] = useState<string | null>(null)
+  const { copied, copy } = useCopy()
 
-  const copy = () => {
-    navigator.clipboard
-      ?.writeText(copyText ?? "")
-      .then(() => {
-        setCopied(true)
-        window.setTimeout(() => setCopied(false), 1500)
-      })
-      .catch(() => {})
+  // The Caddyfile is read once, as the popover opens, not on every render while it stays open.
+  const onOpenChange = (next: boolean) => {
+    setDefinition(next ? siteDefinition(getEditorText(), host) : null)
+    setOpen(next)
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger
         render={<button type="button" />}
         aria-label={label}
@@ -77,7 +75,7 @@ export function DefinitionPopover({
         )}
         <div className="flex items-center justify-end gap-2">
           {definition === null && copyText ? (
-            <Button variant="ghost" size="sm" onClick={copy}>
+            <Button variant="ghost" size="sm" onClick={() => void copy(copyText ?? "")}>
               {copied ? <CheckIcon data-icon="inline-start" /> : <CopyIcon data-icon="inline-start" />}
               {copied ? "Copied" : "Copy"}
             </Button>
@@ -86,7 +84,7 @@ export function DefinitionPopover({
             variant="outline"
             size="sm"
             onClick={() => {
-              setOpen(false)
+              onOpenChange(false)
               requestShowInEditor(host)
             }}
           >

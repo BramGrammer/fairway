@@ -2,7 +2,9 @@ import type { ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Kbd, KbdGroup } from "@/components/ui/kbd"
+import { Separator } from "@/components/ui/separator"
 import { Toggle } from "@/components/ui/toggle"
+import { ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { PRESSED } from "@/lib/toggle-styles"
 import { cn } from "@/lib/utils"
@@ -75,4 +77,21 @@ export function ToolbarToggle({
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   )
+}
+
+/** One icon of a toggle group in the top bar; its name shows in a tooltip and is its accessible name. */
+export function ToolbarGroupToggle({ value, label, children }: { value: string; label: string; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<ToggleGroupItem value={value} aria-label={label} className={PRESSED} />}>
+        {children}
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** A thin vertical line between the groups of a top bar or control row. */
+export function ToolbarDivider() {
+  return <Separator orientation="vertical" className="mx-1 data-vertical:h-6 data-vertical:self-auto" />
 }

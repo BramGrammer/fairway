@@ -96,8 +96,8 @@ test("a refused reload is in the history and reaches ntfy", async () => {
   const r = await rig(true);
   try {
     await deployAndWait(r);
-    const history = (await (await r.get("/api/events")).json()) as { alerts: boolean; events: Array<{ kind: string }> };
-    assert.equal(history.alerts, true);
+    const history = (await (await r.get("/api/events")).json()) as { events: Array<{ kind: string }> };
+    assert.equal(((await (await r.get("/api/alerts")).json()) as { enabled: boolean }).enabled, true);
     assert.equal(history.events.some((e) => e.kind === "deploy_failed"), true);
     assert.equal(r.received.length, 1);
     const hit = r.received[0] as { path: string; title: string; authorization: string; body: string };

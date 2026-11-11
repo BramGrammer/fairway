@@ -3,7 +3,6 @@ import { parsePersistedTable, type PersistedTableOf } from "./table-state.js"
 
 export const EVENT_COLUMN_IDS = ["time", "type", "name", "status", "alert"] as const
 export type EventColumnId = (typeof EVENT_COLUMN_IDS)[number]
-export type PersistedEventsTable = PersistedTableOf<EventColumnId>
 
 /** What an event is about: a kind of Subject, or one of the one-shot occurrences. */
 export type EventType = "caddy" | "host" | "cert" | "upstream" | "deploy" | "edit" | "rollback" | "fairway"
@@ -74,6 +73,6 @@ export const sortKeys = {
 /** Newest first, until the Owner picks another order. */
 export const DEFAULT_SORTING = [{ id: "time", desc: true }]
 
-export function parsePersistedEvents(raw: string | null): PersistedEventsTable {
+export function parsePersistedEvents(raw: string | null): PersistedTableOf<EventColumnId> {
   return parsePersistedTable(raw, EVENT_COLUMN_IDS)
 }

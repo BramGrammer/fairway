@@ -19,18 +19,25 @@ const palette = {
   },
 }
 
-/** The syntax colours of the editor, shared with read-only code blocks. */
+const highlightStyles = new Map<boolean, HighlightStyle>()
+
+/** The syntax colours of the editor, shared with read-only code blocks. One style per theme, built once. */
 export function caddyfileHighlightStyle(dark: boolean) {
-  const colors = dark ? palette.dark : palette.light
-  return HighlightStyle.define([
-    { tag: tags.keyword, color: colors.keyword },
-    { tag: tags.string, color: colors.string },
-    { tag: tags.variableName, color: colors.variable },
-    { tag: tags.atom, color: colors.atom },
-    { tag: tags.typeName, color: colors.type },
-    { tag: tags.comment, color: "var(--muted-foreground)", fontStyle: "italic" },
-    { tag: tags.bracket, color: "var(--muted-foreground)" },
-  ])
+  let style = highlightStyles.get(dark)
+  if (!style) {
+    const colors = dark ? palette.dark : palette.light
+    style = HighlightStyle.define([
+      { tag: tags.keyword, color: colors.keyword },
+      { tag: tags.string, color: colors.string },
+      { tag: tags.variableName, color: colors.variable },
+      { tag: tags.atom, color: colors.atom },
+      { tag: tags.typeName, color: colors.type },
+      { tag: tags.comment, color: "var(--muted-foreground)", fontStyle: "italic" },
+      { tag: tags.bracket, color: "var(--muted-foreground)" },
+    ])
+    highlightStyles.set(dark, style)
+  }
+  return style
 }
 
 /** Editor chrome follows the shadcn CSS variables; syntax colours switch with the theme. */

@@ -3,12 +3,11 @@ import {
   ArrowDownToLineIcon,
   PauseIcon,
   ScrollTextIcon,
-  SearchIcon,
   Trash2Icon,
-  XIcon,
 } from "lucide-react"
 
-import { ToolbarAction, ToolbarToggle } from "@/components/toolbar-action"
+import { SearchField } from "@/components/search-field"
+import { ToolbarAction, ToolbarDivider, ToolbarToggle } from "@/components/toolbar-action"
 import { TopBar } from "@/components/top-bar"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -18,12 +17,6 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
@@ -33,7 +26,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { api, openStream } from "@/lib/api"
 import { PRESSED } from "@/lib/toggle-styles"
@@ -108,11 +100,6 @@ function StatusBadge({ entry }: { entry: LogEntry }) {
   return <Badge variant={variant} className="w-12 justify-center">{entry.level}</Badge>
 }
 
-/** A thin vertical line between the groups of the top bar. */
-function Divider() {
-  return <Separator orientation="vertical" className="mx-1 data-vertical:h-6 data-vertical:self-auto" />
-}
-
 /** `active` is true while the tab is visible; the panel stays mounted so the stream keeps running. */
 export function LogsTab({ active }: { active: boolean }) {
   const [entries, setEntries] = useState<LogEntry[] | null>(null)
@@ -180,30 +167,14 @@ export function LogsTab({ active }: { active: boolean }) {
       {active && (
         <TopBar>
           <div className="flex items-center gap-2">
-            <InputGroup className="w-48">
-              <InputGroupAddon>
-                <SearchIcon />
-              </InputGroupAddon>
-              <InputGroupInput
-                type="text"
-                role="searchbox"
-                inputMode="search"
-                enterKeyHint="search"
-                placeholder="Search logs"
-                aria-label="Search logs"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                onKeyDown={(event) => event.key === "Escape" && setSearch("")}
-              />
-              {search && (
-                <InputGroupAddon align="inline-end">
-                  <InputGroupButton size="icon-xs" aria-label="Clear search" onClick={() => setSearch("")}>
-                    <XIcon />
-                  </InputGroupButton>
-                </InputGroupAddon>
-              )}
-            </InputGroup>
-            <Divider />
+            <SearchField
+              className="w-48"
+              value={search}
+              onChange={setSearch}
+              placeholder="Search logs"
+              label="Search logs"
+            />
+            <ToolbarDivider />
             <Select items={LEVELS} value={level} onValueChange={(value) => value && setLevel(value)}>
               <SelectTrigger className="w-44">
                 <SelectValue />
@@ -218,7 +189,7 @@ export function LogsTab({ active }: { active: boolean }) {
                 </SelectGroup>
               </SelectContent>
             </Select>
-            <Divider />
+            <ToolbarDivider />
             <ToggleGroup
               variant="outline"
               spacing={0}
@@ -236,7 +207,7 @@ export function LogsTab({ active }: { active: boolean }) {
             </ToggleGroup>
           </div>
 
-          <Divider />
+          <ToolbarDivider />
 
           <div className="flex items-center gap-1">
             <ToolbarToggle
@@ -251,7 +222,7 @@ export function LogsTab({ active }: { active: boolean }) {
             </ToolbarToggle>
           </div>
 
-          <Divider />
+          <ToolbarDivider />
 
           <ToolbarAction
             label="Clear the list"

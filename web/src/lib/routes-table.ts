@@ -71,9 +71,7 @@ export const sortKeys = {
   middleware: (row: RouteRow) => middlewareCount(row),
 }
 
-export type PersistedTable = PersistedTableOf<ColumnId>
-
 /** Reads stored table state; anything unexpected is dropped, never thrown. */
-export function parsePersisted(raw: string | null): PersistedTable {
+export function parsePersisted(raw: string | null): PersistedTableOf<ColumnId> {
   return parsePersistedTable(raw, COLUMN_IDS, ["activity"])
 }

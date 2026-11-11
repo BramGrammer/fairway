@@ -25,6 +25,7 @@ import {
   sortKeys,
   TYPE_LABELS,
 } from "@/lib/events-table"
+import { loadTableState, saveTableState } from "@/lib/table-state"
 import { formatSpan } from "@/lib/timeline"
 
 const STORAGE_KEY = "fairway.events-table"
@@ -47,22 +48,6 @@ const STATE_VARIANT: Record<StateName, "success" | "warning" | "destructive"> = 
   ok: "success",
   warning: "warning",
   down: "destructive",
-}
-
-function loadState() {
-  try {
-    return parsePersistedEvents(localStorage.getItem(STORAGE_KEY))
-  } catch {
-    return parsePersistedEvents(null)
-  }
-}
-
-function saveState(sorting: SortingState, visibility: VisibilityState) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ sorting, visibility }))
-  } catch {
-    // Storage may be unavailable; the table still works.
-  }
 }
 
 /** A State as a tinted badge; no State at all means the Subject was new or is no longer watched. */
@@ -100,11 +85,11 @@ function StatusCell({ event }: { event: EventRecord }) {
 
 /** The list of events as a data table: when, what kind, which one, and what changed. */
 export function EventsTable({ events, now, notice }: { events: EventRecord[]; now: number; notice?: string }) {
-  const [initial] = useState(loadState)
+  const [initial] = useState(() => loadTableState(STORAGE_KEY, parsePersistedEvents))
   const [sorting, setSorting] = useState<SortingState>(initial.sorting.length > 0 ? initial.sorting : DEFAULT_SORTING)
   const [visibility, setVisibility] = useState<VisibilityState>(initial.visibility)
 
-  useEffect(() => saveState(sorting, visibility), [sorting, visibility])
+  useEffect(() => saveTableState(STORAGE_KEY, sorting, visibility), [sorting, visibility])
 
   const columns = useMemo<ColumnDef<EventRecord>[]>(
     () => [

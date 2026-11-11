@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   getCoreRowModel,
   getSortedRowModel,
@@ -29,6 +29,7 @@ import {
   sortKeys,
   type RouteRow,
 } from "@/lib/routes-table"
+import { loadTableState, saveTableState } from "@/lib/table-state"
 import { cn } from "@/lib/utils"
 import { HostAlertBell } from "@/features/host-alerts"
 import { DEST_ICONS, HostLink, hostLabel } from "@/features/routes-shared"
@@ -42,22 +43,6 @@ const TITLES: Record<string, string> = {
   destination: "Destination",
   middleware: "Middleware",
   activity: "Last 24 h",
-}
-
-function loadState() {
-  try {
-    return parsePersisted(localStorage.getItem(STORAGE_KEY))
-  } catch {
-    return parsePersisted(null)
-  }
-}
-
-function saveState(sorting: SortingState, visibility: VisibilityState) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ sorting, visibility }))
-  } catch {
-    // Storage may be unavailable; the table still works.
-  }
 }
 
 /** Whether each row repeats the host above it, in the order the table shows them. */
@@ -105,7 +90,7 @@ function HostCell({ row, repeat }: { row: RouteRow; repeat: boolean }) {
   )
 }
 
-function PathCell({ row, editorText }: { row: RouteRow; editorText: string }) {
+function PathCell({ row, getEditorText }: { row: RouteRow; getEditorText: () => string }) {
   const chips = matcherChips(row.rule)
   if (!row.rule) return <Muted>—</Muted>
   const { shown, more } = collapse(chips)
@@ -114,7 +99,7 @@ function PathCell({ row, editorText }: { row: RouteRow; editorText: string }) {
       label={`Path of ${hostLabel(row.host)}`}
       title={`Path of ${hostLabel(row.host)}`}
       host={row.host}
-      editorText={editorText}
+      getEditorText={getEditorText}
       copyText={chips.map((chip) => chip.detail ?? chip.label).join("\n") || undefined}
       fallback={
         chips.length === 0 ? (
@@ -138,7 +123,7 @@ function PathCell({ row, editorText }: { row: RouteRow; editorText: string }) {
   )
 }
 
-function DestinationCell({ row, editorText }: { row: RouteRow; editorText: string }) {
+function DestinationCell({ row, getEditorText }: { row: RouteRow; getEditorText: () => string }) {
   const { first, label, more } = destinationSummary(row.rule)
   if (!first) return <Muted>—</Muted>
   const Icon = DEST_ICONS[first.kind]
@@ -157,7 +142,7 @@ function DestinationCell({ row, editorText }: { row: RouteRow; editorText: strin
       label={`Destination of ${hostLabel(row.host)}`}
       title={`Destination of ${hostLabel(row.host)}`}
       host={row.host}
-      editorText={editorText}
+      getEditorText={getEditorText}
       intro={list}
       copyText={all.join("\n")}
       fallback={null}
@@ -184,7 +169,7 @@ function ChipList({ chips }: { chips: Chip[] }) {
   )
 }
 
-function MiddlewareCell({ row, editorText }: { row: RouteRow; editorText: string }) {
+function MiddlewareCell({ row, getEditorText }: { row: RouteRow; getEditorText: () => string }) {
   const count = middlewareCount(row)
   if (count === 0) return null
   const own = row.rule?.middleware ?? []
@@ -193,7 +178,7 @@ function MiddlewareCell({ row, editorText }: { row: RouteRow; editorText: string
       label={`Middleware of ${hostLabel(row.host)}`}
       title={`Middleware of ${hostLabel(row.host)}`}
       host={row.host}
-      editorText={editorText}
+      getEditorText={getEditorText}
       fallback={
         <ScrollArea autoHide className="max-h-64">
           <div className="flex flex-col gap-2">
@@ -238,11 +223,17 @@ export function RoutesTable({
   summary?: ReactNode
 }) {
   const data = useMemo(() => flattenSites(sites), [sites])
-  const [initial] = useState(loadState)
+  // The popovers read the Caddyfile when they open. Passing a getter keeps the columns the same while the text changes.
+  const textRef = useRef(editorText)
+  useEffect(() => {
+    textRef.current = editorText
+  })
+  const getEditorText = useCallback(() => textRef.current, [])
+  const [initial] = useState(() => loadTableState(STORAGE_KEY, parsePersisted))
   const [sorting, setSorting] = useState<SortingState>(initial.sorting)
   const [visibility, setVisibility] = useState<VisibilityState>(initial.visibility)
 
-  useEffect(() => saveState(sorting, visibility), [sorting, visibility])
+  useEffect(() => saveTableState(STORAGE_KEY, sorting, visibility), [sorting, visibility])
 
   const columns = useMemo<ColumnDef<RouteRow>[]>(
     () => [
@@ -256,19 +247,19 @@ export function RoutesTable({
         id: "path",
         accessorFn: sortKeys.path,
         header: ({ column }) => <DataTableColumnHeader column={column} title={TITLES.path} />,
-        cell: ({ row }) => <PathCell row={row.original} editorText={editorText} />,
+        cell: ({ row }) => <PathCell row={row.original} getEditorText={getEditorText} />,
       },
       {
         id: "destination",
         accessorFn: sortKeys.destination,
         header: ({ column }) => <DataTableColumnHeader column={column} title={TITLES.destination} />,
-        cell: ({ row }) => <DestinationCell row={row.original} editorText={editorText} />,
+        cell: ({ row }) => <DestinationCell row={row.original} getEditorText={getEditorText} />,
       },
       {
         id: "middleware",
         accessorFn: sortKeys.middleware,
         header: ({ column }) => <DataTableColumnHeader column={column} title={TITLES.middleware} />,
-        cell: ({ row }) => <MiddlewareCell row={row.original} editorText={editorText} />,
+        cell: ({ row }) => <MiddlewareCell row={row.original} getEditorText={getEditorText} />,
       },
       {
         id: "activity",
@@ -277,7 +268,7 @@ export function RoutesTable({
         cell: ({ row }) => <ActivityCell host={row.original.host} />,
       },
     ],
-    [editorText],
+    [getEditorText],
   )
 
   // TanStack's table instance is intentionally not memoized.

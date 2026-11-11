@@ -1,14 +1,12 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   CircleAlertIcon,
   FileCodeIcon,
   RefreshCwIcon,
   RouteIcon,
-  SearchIcon,
   ServerIcon,
   TableIcon,
   WorkflowIcon,
-  XIcon,
 } from "lucide-react"
 
 import { TopBar } from "@/components/top-bar"
@@ -20,17 +18,10 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from "@/components/ui/input-group"
-import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { ToolbarAction } from "@/components/toolbar-action"
+import { ToggleGroup } from "@/components/ui/toggle-group"
+import { SearchField } from "@/components/search-field"
+import { ToolbarAction, ToolbarDivider, ToolbarGroupToggle } from "@/components/toolbar-action"
 import {
   api,
   type RoutesReply,
@@ -38,7 +29,6 @@ import {
 } from "@/lib/api"
 import { useRouter } from "@/hooks/use-router"
 import { cn } from "@/lib/utils"
-import { PRESSED } from "@/lib/toggle-styles"
 import { RoutesSummary } from "@/features/routes-summary"
 import { RoutesTable } from "@/features/routes-table"
 import { RoutesGraph } from "@/features/routes-graph"
@@ -64,18 +54,6 @@ function countUpstreams(sites: Site[]): number {
   return upstreams.size
 }
 
-/** One icon of a toggle group; the tooltip and the accessible name say what it shows. */
-function ViewToggle({ value, label, children }: { value: string; label: string; children: ReactNode }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger render={<ToggleGroupItem value={value} aria-label={label} className={PRESSED} />}>
-        {children}
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
-  )
-}
-
 export function RoutesTab({ editorText }: RoutesTabProps) {
   // View state lives in the URL, so a reload or a pasted link shows the same thing.
   const { params, replaceParams } = useRouter()
@@ -91,19 +69,28 @@ export function RoutesTab({ editorText }: RoutesTabProps) {
   const key = `${source}:${refresh}`
   const loading = result?.key !== key
 
+  // The editor's text is only sent, and only watched, when it is the source; it changes with every keystroke.
+  const text = source === "editor" ? editorText : null
+
   useEffect(() => {
     let active = true
-    api<RoutesReply>("/api/routes", source === "editor" ? { text: editorText } : {})
-      .then(({ body }) => {
-        if (active) setResult({ key, sites: body.ok ? body.sites : [], error: body.ok ? null : body.error })
-      })
-      .catch(() => {
-        if (active) setResult({ key, sites: [], error: "Cannot reach the editor server." })
-      })
+    const timer = setTimeout(
+      () => {
+        api<RoutesReply>("/api/routes", text === null ? {} : { text })
+          .then(({ body }) => {
+            if (active) setResult({ key, sites: body.ok ? body.sites : [], error: body.ok ? null : body.error })
+          })
+          .catch(() => {
+            if (active) setResult({ key, sites: [], error: "Cannot reach the editor server." })
+          })
+      },
+      text === null ? 0 : 300, // wait for a pause in typing before asking Caddy to adapt the text
+    )
     return () => {
       active = false
+      clearTimeout(timer)
     }
-  }, [key, source, editorText])
+  }, [key, text])
 
   const query = normalizeQuery(search)
   const sites = useMemo(
@@ -120,32 +107,15 @@ export function RoutesTab({ editorText }: RoutesTabProps) {
   return (
     <div className="flex h-full flex-col">
       <TopBar>
-        <InputGroup className="w-64">
-          <InputGroupAddon>
-            <SearchIcon />
-          </InputGroupAddon>
-          {/* A plain text field: `type="search"` would add the browser's own clear button next to ours. */}
-          <InputGroupInput
-            type="text"
-            role="searchbox"
-            inputMode="search"
-            enterKeyHint="search"
-            placeholder="Search hosts, upstreams, middleware"
-            aria-label="Search routes"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            onKeyDown={(event) => event.key === "Escape" && setSearch("")}
-          />
-          {search && (
-            <InputGroupAddon align="inline-end">
-              <InputGroupButton size="icon-xs" aria-label="Clear search" onClick={() => setSearch("")}>
-                <XIcon />
-              </InputGroupButton>
-            </InputGroupAddon>
-          )}
-        </InputGroup>
+        <SearchField
+          className="w-64"
+          value={search}
+          onChange={setSearch}
+          placeholder="Search hosts, upstreams, middleware"
+          label="Search routes"
+        />
 
-        <Separator orientation="vertical" className="mx-1 data-vertical:h-6 data-vertical:self-auto" />
+        <ToolbarDivider />
 
         <ToggleGroup
           variant="outline"
@@ -154,15 +124,15 @@ export function RoutesTab({ editorText }: RoutesTabProps) {
           value={[grouping]}
           onValueChange={(value) => value[0] && setGrouping(value[0] as Grouping)}
         >
-          <ViewToggle value="graph" label="Graph view">
+          <ToolbarGroupToggle value="graph" label="Graph view">
             <WorkflowIcon />
-          </ViewToggle>
-          <ViewToggle value="site" label="Table view">
+          </ToolbarGroupToggle>
+          <ToolbarGroupToggle value="site" label="Table view">
             <TableIcon />
-          </ViewToggle>
+          </ToolbarGroupToggle>
         </ToggleGroup>
 
-        <Separator orientation="vertical" className="mx-1 data-vertical:h-6 data-vertical:self-auto" />
+        <ToolbarDivider />
 
         <ToggleGroup
           variant="outline"
@@ -171,15 +141,15 @@ export function RoutesTab({ editorText }: RoutesTabProps) {
           value={[source]}
           onValueChange={(value) => value[0] && setSource(value[0] as Source)}
         >
-          <ViewToggle value="running" label="Running config">
+          <ToolbarGroupToggle value="running" label="Running config">
             <ServerIcon />
-          </ViewToggle>
-          <ViewToggle value="editor" label="Editor text, with unsaved changes">
+          </ToolbarGroupToggle>
+          <ToolbarGroupToggle value="editor" label="Editor text, with unsaved changes">
             <FileCodeIcon />
-          </ViewToggle>
+          </ToolbarGroupToggle>
         </ToggleGroup>
 
-        <Separator orientation="vertical" className="mx-1 data-vertical:h-6 data-vertical:self-auto" />
+        <ToolbarDivider />
 
         <ToolbarAction
           label="Refresh"

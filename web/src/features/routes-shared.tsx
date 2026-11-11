@@ -9,6 +9,7 @@ import {
 
 import { buttonVariants } from "@/components/ui/button"
 
+/** The icon of each kind of destination. */
 export const DEST_ICONS = {
   proxy: ArrowRightIcon,
   file: FolderIcon,
@@ -17,7 +18,7 @@ export const DEST_ICONS = {
   other: CircleQuestionMarkIcon,
 } as const
 
-const isDomain = (host: string) => /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host)
+export const isDomain = (host: string) => /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host)
 
 export const hostLabel = (host: string) => (host === "*" ? "any host" : host)
 

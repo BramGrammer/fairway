@@ -214,7 +214,7 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
   app.get("/api/events", (c) => {
     const subject = c.req.query("subject") || undefined;
     const limit = Math.min(Math.max(Number(c.req.query("limit")) || 200, 1), 500);
-    return c.json({ ok: true, alerts: events.alertsEnabled, events: events.list({ subject, limit }) });
+    return c.json({ ok: true, events: events.list({ subject, limit }) });
   });
 
   // Per host: the worst State among its Certificate, its synthetic check and its upstreams over a window.
