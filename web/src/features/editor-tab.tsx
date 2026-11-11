@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import {
   CircleAlertIcon,
@@ -22,6 +22,7 @@ import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Kbd, KbdGroup } from "@/components/ui/kbd"
 import { ShortcutsPopover } from "@/components/shortcuts-popover"
+import { ToolbarAction } from "@/components/toolbar-action"
 import { altKey, modKey, shiftKey } from "@/lib/keys"
 import { TopBar, TopBarTitle } from "@/components/top-bar"
 import { Spinner } from "@/components/ui/spinner"
@@ -62,44 +63,6 @@ interface Notice {
   body?: string
 }
 
-
-/** An icon-only button of the top bar; its name, and its shortcut if it has one, show in a tooltip. */
-function ToolbarAction({
-  label,
-  keys,
-  variant = "outline",
-  disabled,
-  onClick,
-  children,
-}: {
-  label: string
-  keys?: string[]
-  variant?: "outline" | "ghost"
-  disabled?: boolean
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <Tooltip>
-      {/* The span keeps the tooltip working while the button is disabled. */}
-      <TooltipTrigger render={<span className="inline-flex" />}>
-        <Button variant={variant} size="icon" aria-label={label} onClick={onClick} disabled={disabled}>
-          {children}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>
-        {label}
-        {keys && (
-          <KbdGroup>
-            {keys.map((key) => (
-              <Kbd key={key}>{key}</Kbd>
-            ))}
-          </KbdGroup>
-        )}
-      </TooltipContent>
-    </Tooltip>
-  )
-}
 
 export function EditorTab({
   active,

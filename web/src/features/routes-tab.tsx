@@ -1,15 +1,18 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import {
   CircleAlertIcon,
+  FileCodeIcon,
   RefreshCwIcon,
   RouteIcon,
   SearchIcon,
+  ServerIcon,
+  TableIcon,
+  WorkflowIcon,
   XIcon,
 } from "lucide-react"
 
 import { TopBar } from "@/components/top-bar"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Button } from "@/components/ui/button"
 import {
   Empty,
   EmptyDescription,
@@ -27,6 +30,8 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { ToolbarAction } from "@/components/toolbar-action"
 import {
   api,
   type RoutesReply,
@@ -57,6 +62,18 @@ function countUpstreams(sites: Site[]): number {
       for (const dest of rule.destinations)
         if (dest.kind === "proxy") for (const upstream of dest.upstreams ?? []) upstreams.add(upstream)
   return upstreams.size
+}
+
+/** One icon of a toggle group; the tooltip and the accessible name say what it shows. */
+function ViewToggle({ value, label, children }: { value: string; label: string; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<ToggleGroupItem value={value} aria-label={label} className={PRESSED} />}>
+        {children}
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  )
 }
 
 export function RoutesTab({ editorText }: RoutesTabProps) {
@@ -134,13 +151,15 @@ export function RoutesTab({ editorText }: RoutesTabProps) {
           value={[grouping]}
           onValueChange={(value) => value[0] && setGrouping(value[0] as Grouping)}
         >
-          <ToggleGroupItem value="graph" className={PRESSED}>
-            Graph
-          </ToggleGroupItem>
-          <ToggleGroupItem value="site" className={PRESSED}>
-            Table
-          </ToggleGroupItem>
+          <ViewToggle value="graph" label="Graph view">
+            <WorkflowIcon />
+          </ViewToggle>
+          <ViewToggle value="site" label="Table view">
+            <TableIcon />
+          </ViewToggle>
         </ToggleGroup>
+
+        <Separator orientation="vertical" className="mx-1 data-vertical:h-6 data-vertical:self-auto" />
 
         <ToggleGroup
           variant="outline"
@@ -149,20 +168,23 @@ export function RoutesTab({ editorText }: RoutesTabProps) {
           value={[source]}
           onValueChange={(value) => value[0] && setSource(value[0] as Source)}
         >
-          <ToggleGroupItem value="running" className={PRESSED}>
-            Running
-          </ToggleGroupItem>
-          <ToggleGroupItem value="editor" className={PRESSED}>
-            Editor
-          </ToggleGroupItem>
+          <ViewToggle value="running" label="Running config">
+            <ServerIcon />
+          </ViewToggle>
+          <ViewToggle value="editor" label="Editor text, with unsaved changes">
+            <FileCodeIcon />
+          </ViewToggle>
         </ToggleGroup>
 
         <Separator orientation="vertical" className="mx-1 data-vertical:h-6 data-vertical:self-auto" />
 
-        <Button variant="ghost" onClick={() => setRefresh((count) => count + 1)} disabled={loading}>
-          <RefreshCwIcon data-icon="inline-start" />
-          Refresh
-        </Button>
+        <ToolbarAction
+          label="Refresh"
+          onClick={() => setRefresh((count) => count + 1)}
+          disabled={loading}
+        >
+          <RefreshCwIcon />
+        </ToolbarAction>
       </TopBar>
 
       {result?.error && (
