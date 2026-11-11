@@ -9,7 +9,6 @@ import {
 
 import { TopBar } from "@/components/top-bar"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Empty,
@@ -27,18 +26,9 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   api,
-  type Destination,
   type RoutesReply,
   type Site,
 } from "@/lib/api"
@@ -46,116 +36,34 @@ import { useRouter } from "@/hooks/use-router"
 import { cn } from "@/lib/utils"
 import { PRESSED } from "@/lib/toggle-styles"
 import { RoutesTable } from "@/features/routes-table"
-import { DEST_ICONS, hostLabel } from "@/features/routes-shared"
 import { RoutesGraph } from "@/features/routes-graph"
 import { normalizeQuery, siteMatches } from "@/features/routes-filter"
 
 type Source = "running" | "editor"
-type Grouping = "graph" | "site" | "upstream"
+type Grouping = "graph" | "site"
 
-const GROUP_PARAM = { graph: undefined, site: "table", upstream: "destination" } as const
+const GROUP_PARAM = { graph: undefined, site: "table" } as const
 
 interface RoutesTabProps {
   /** The editor's current text, shown when the source is "Editor". */
   editorText: string
 }
 
-function DestinationView({ dest }: { dest: Destination }) {
-  const Icon = DEST_ICONS[dest.kind]
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <Icon className="size-4 shrink-0 text-muted-foreground" />
-      {dest.kind === "proxy" ? (
-        dest.upstreams?.map((upstream) => (
-          <Badge key={upstream} variant="secondary" className="font-mono">
-            {upstream}
-          </Badge>
-        ))
-      ) : (
-        <span>{dest.summary}</span>
-      )}
-    </div>
-  )
-}
-
-const matchLabel = (match: string) => match || "all requests"
-
-interface Group {
-  key: string
-  dest: Destination
-  uses: { host: string; match: string }[]
-}
-
-/** One group per upstream address (or per other kind of destination), listing who uses it. */
-function groupByDestination(sites: Site[]): Group[] {
-  const groups = new Map<string, Group>()
-  const add = (key: string, dest: Destination, host: string, match: string) => {
-    const group = groups.get(key) ?? { key, dest, uses: [] }
-    group.uses.push({ host, match })
-    groups.set(key, group)
-  }
-  for (const site of sites) {
-    for (const rule of site.rules) {
-      for (const dest of rule.destinations) {
-        for (const host of site.hosts) {
-          if (dest.kind === "proxy") {
-            for (const upstream of dest.upstreams ?? []) {
-              add(`proxy:${upstream}`, { ...dest, upstreams: [upstream] }, host, rule.match)
-            }
-          } else {
-            add(`${dest.kind}:${dest.summary}`, dest, host, rule.match)
-          }
-        }
-      }
-    }
-  }
-  const rank = (group: Group) => (group.dest.kind === "proxy" ? 0 : 1)
-  return [...groups.values()].sort(
-    (a, b) => rank(a) - rank(b) || b.uses.length - a.uses.length || a.key.localeCompare(b.key),
-  )
-}
-
-function UpstreamTable({ sites }: { sites: Site[] }) {
-  const groups = useMemo(() => groupByDestination(sites), [sites])
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="pl-4">Destination</TableHead>
-          <TableHead>Used by</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {groups.map((group) => (
-          <TableRow key={group.key}>
-            <TableCell className="min-w-64 pl-4 align-top whitespace-normal">
-              <div className="flex items-center gap-2 py-1">
-                <DestinationView dest={group.dest} />
-                <Badge variant="outline">{group.uses.length}</Badge>
-              </div>
-            </TableCell>
-            <TableCell className="pr-4 whitespace-normal">
-              <div className="flex flex-col gap-1 py-1">
-                {group.uses.map((use, i) => (
-                  <div key={i} className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium">{hostLabel(use.host)}</span>
-                    <span className="font-mono text-xs text-muted-foreground">{matchLabel(use.match)}</span>
-                  </div>
-                ))}
-              </div>
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
-  )
+/** How many different upstream addresses the sites proxy to. */
+function countUpstreams(sites: Site[]): number {
+  const upstreams = new Set<string>()
+  for (const site of sites)
+    for (const rule of site.rules)
+      for (const dest of rule.destinations)
+        if (dest.kind === "proxy") for (const upstream of dest.upstreams ?? []) upstreams.add(upstream)
+  return upstreams.size
 }
 
 export function RoutesTab({ editorText }: RoutesTabProps) {
   // View state lives in the URL, so a reload or a pasted link shows the same thing.
   const { params, replaceParams } = useRouter()
   const source: Source = params.source ?? "running"
-  const grouping: Grouping = params.group === "table" ? "site" : params.group === "destination" ? "upstream" : "graph"
+  const grouping: Grouping = params.group === "table" ? "site" : "graph"
   const search = params.q ?? ""
   const setSource = (value: Source) => replaceParams({ source: value === "editor" ? "editor" : undefined })
   const setGrouping = (value: Grouping) => replaceParams({ group: GROUP_PARAM[value] })
@@ -186,10 +94,7 @@ export function RoutesTab({ editorText }: RoutesTabProps) {
     [result, query]
   )
   const routeCount = sites.reduce((total, site) => total + site.rules.length, 0)
-  const upstreamCount = useMemo(
-    () => groupByDestination(sites).filter((group) => group.dest.kind === "proxy").length,
-    [sites]
-  )
+  const upstreamCount = useMemo(() => countUpstreams(sites), [sites])
 
   const summary = `${sites.length} ${sites.length === 1 ? "site" : "sites"} · ${routeCount} ${
     routeCount === 1 ? "route" : "routes"
@@ -234,9 +139,6 @@ export function RoutesTab({ editorText }: RoutesTabProps) {
           </ToggleGroupItem>
           <ToggleGroupItem value="site" className={PRESSED}>
             Table
-          </ToggleGroupItem>
-          <ToggleGroupItem value="upstream" className={PRESSED}>
-            By destination
           </ToggleGroupItem>
         </ToggleGroup>
 
@@ -302,11 +204,7 @@ export function RoutesTab({ editorText }: RoutesTabProps) {
               <RoutesGraph sites={sites} query={query} />
             ) : (
               <ScrollArea className="h-full">
-                {grouping === "site" ? (
-                  <RoutesTable sites={sites} editorText={editorText} summary={summary} />
-                ) : (
-                  <UpstreamTable sites={sites} />
-                )}
+                <RoutesTable sites={sites} editorText={editorText} summary={summary} />
               </ScrollArea>
             )}
           </div>

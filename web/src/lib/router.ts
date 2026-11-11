@@ -11,7 +11,7 @@ export interface Params {
   /** Settings dialog open on this category (any page). */
   settings?: SettingsCategory
   /** Routes page: how routes are grouped. The graph is the default and is left out. */
-  group?: "table" | "destination"
+  group?: "table"
   /** Routes page: show the editor's unsaved text. The running config is the default and is left out. */
   source?: "editor"
   /** Routes page: the search text. */
@@ -60,7 +60,7 @@ export function parseParams(search: string, page: Page): Params {
     out.settings = settings as SettingsCategory
   }
   const group = query.get("group")
-  if (owns("group") && (group === "table" || group === "destination")) out.group = group
+  if (owns("group") && group === "table") out.group = group
   if (owns("source") && query.get("source") === "editor") out.source = "editor"
   const q = query.get("q")
   if (owns("q") && q && q.length <= MAX_TEXT) out.q = q

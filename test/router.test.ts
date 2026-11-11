@@ -51,8 +51,8 @@ describe("resolveLocation", () => {
 
 describe("parseParams", () => {
   it("reads the parameters of the routes page", () => {
-    assert.deepEqual(parseParams("?group=destination&source=editor&q=app&node=host%3Aa.test", "routes"), {
-      group: "destination",
+    assert.deepEqual(parseParams("?group=table&source=editor&q=app&node=host%3Aa.test", "routes"), {
+      group: "table",
       source: "editor",
       q: "app",
       node: "host:a.test",
@@ -66,6 +66,8 @@ describe("parseParams", () => {
   });
 
   it("drops values that are unknown or invalid", () => {
+    // The old "by destination" view is gone, so an old link just shows the graph.
+    assert.deepEqual(parseParams("?group=destination", "routes"), {});
     assert.deepEqual(parseParams("?settings=x&group=graph&source=running&q=&node=", "routes"), {});
     assert.deepEqual(parseParams("?revision=../etc&", "history"), {});
     assert.deepEqual(parseParams(`?q=${"a".repeat(201)}`, "routes"), {});
@@ -94,7 +96,7 @@ describe("buildUrl", () => {
   });
 
   it("round trips through parseParams", () => {
-    const params = { group: "destination", source: "editor", q: "a b&c=d", node: "proxy:app:8080" } as const;
+    const params = { group: "table", source: "editor", q: "a b&c=d", node: "proxy:app:8080" } as const;
     const url = new URL(buildUrl("routes", params), "http://x");
     assert.deepEqual(parseParams(url.search, "routes"), params);
   });
