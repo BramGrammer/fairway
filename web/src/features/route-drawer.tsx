@@ -42,6 +42,7 @@ export function RouteDrawer({ name, kind, overview, onClose }: RouteDrawerProps)
   return (
     <SideDrawer
       label={`${name} details`}
+      fill={tab === "logs"}
       onClose={onClose}
       title={
         <>
