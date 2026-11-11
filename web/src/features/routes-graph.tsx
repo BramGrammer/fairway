@@ -1030,7 +1030,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
           </>
         )}
         <div className="ml-auto flex items-center gap-2">
-          {pinned ? (
+          {pinned && (
             <>
               <Badge variant="secondary">
                 <PinIcon data-icon="inline-start" />
@@ -1057,10 +1057,6 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
                 Clear
               </Button>
             </>
-          ) : (
-            <span className="text-xs text-muted-foreground">
-              Click a box to pin its paths · use the arrow on a group to open it
-            </span>
           )}
         </div>
       </div>

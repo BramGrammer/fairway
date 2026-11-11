@@ -40,6 +40,7 @@ import {
 import { useRouter } from "@/hooks/use-router"
 import { cn } from "@/lib/utils"
 import { PRESSED } from "@/lib/toggle-styles"
+import { RoutesSummary } from "@/features/routes-summary"
 import { RoutesTable } from "@/features/routes-table"
 import { RoutesGraph } from "@/features/routes-graph"
 import { normalizeQuery, siteMatches } from "@/features/routes-filter"
@@ -113,11 +114,9 @@ export function RoutesTab({ editorText }: RoutesTabProps) {
   const routeCount = sites.reduce((total, site) => total + site.rules.length, 0)
   const upstreamCount = useMemo(() => countUpstreams(sites), [sites])
 
-  const summary = `${sites.length} ${sites.length === 1 ? "site" : "sites"} · ${routeCount} ${
-    routeCount === 1 ? "route" : "routes"
-  } · ${upstreamCount} ${upstreamCount === 1 ? "upstream" : "upstreams"} · ${
-    source === "running" ? "running config" : "unsaved editor text"
-  }`
+  const summary = (
+    <RoutesSummary sites={sites.length} routes={routeCount} upstreams={upstreamCount} source={source} />
+  )
 
   return (
     <div className="flex h-full flex-col">
@@ -198,7 +197,7 @@ export function RoutesTab({ editorText }: RoutesTabProps) {
       )}
 
       {result && !result.error && grouping !== "site" && (
-        <div className="flex h-10 shrink-0 items-center border-b px-4 text-xs text-muted-foreground">{summary}</div>
+        <div className="flex h-10 shrink-0 items-center border-b px-4">{summary}</div>
       )}
 
       <div className="min-h-0 flex-1">

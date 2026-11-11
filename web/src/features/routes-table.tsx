@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import {
   getCoreRowModel,
   getSortedRowModel,
@@ -232,7 +232,7 @@ export function RoutesTable({
   sites: Site[]
   editorText: string
   /** The "N sites · N routes" line shown at the left of the toolbar. */
-  summary?: string
+  summary?: ReactNode
 }) {
   const data = useMemo(() => flattenSites(sites), [sites])
   const [initial] = useState(loadState)
@@ -294,7 +294,7 @@ export function RoutesTable({
   return (
     <div className="flex flex-col">
       <div className="flex h-10 items-center justify-between gap-2 border-b px-4">
-        <span className="text-xs text-muted-foreground">{summary}</span>
+        {summary}
         <DataTableViewOptions table={table} titles={TITLES} />
       </div>
       <DataTable table={table} empty="No routes." />
