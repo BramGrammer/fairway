@@ -23,14 +23,14 @@ function sessionLost() {
 export async function api<T = unknown>(
   path: string,
   body?: unknown,
-  options: { background?: boolean } = {}
+  options: { background?: boolean; method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" } = {}
 ): Promise<Reply<T>> {
   const headers: Record<string, string> = {}
   if (body !== undefined) headers["Content-Type"] = "application/json"
   // Periodic polls must not keep a forgotten tab signed in: the server does not renew the session for these.
   if (options.background) headers["X-Fairway-Background"] = "1"
   const response = await fetch(path, {
-    method: body === undefined ? "GET" : "POST",
+    method: options.method ?? (body === undefined ? "GET" : "POST"),
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   })

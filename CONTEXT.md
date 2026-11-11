@@ -43,6 +43,21 @@ The single person who signs in to Fairway. There are no other users or roles. Th
 **Session**:
 The period during which the Owner is signed in. It ends when they sign out, after a stretch of inactivity, or after a fixed maximum.
 
+**Subject**:
+Something Fairway watches and gives a State to: a Site's Certificate, an upstream, how a host answers requests, or Caddy itself.
+
+**State**:
+The condition of a Subject once it has held long enough to count (ok, warning or down). A brief blip is not a State.
+
+**Event**:
+A recorded change of a Subject's State, or a one-shot occurrence such as a failed deploy. Events make up the history.
+
+**Alert**:
+The message Fairway sends to the Owner because of an Event.
+
+**Gap**:
+A period in which Fairway was not watching. Shown in the history as unknown, never as down, and never alerted.
+
 **Revision**:
 A saved, timestamped version of the Caddyfile that has been applied. Can be diffed against and rolled back to.
 
@@ -56,4 +71,6 @@ Reloading an earlier Revision as the live Caddyfile.
 
 - A Caddyfile is validated, then reloaded; a successful reload creates a Revision.
 - A Site has one or more Rules; each Rule has Middleware and leads to one or more Destinations.
+- A Subject has one State at a time; each change of State is an Event, and some Events cause an Alert.
+- Events that are not State changes (a failed deploy, an outside edit) have no recovery.
 - Fairway never holds an invalid Caddyfile as the live one.

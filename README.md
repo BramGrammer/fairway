@@ -91,6 +91,34 @@ Caddy's admin API reports configuration, not certificates. When `TLS_PROBE_ADDR`
 
 The address must reach Caddy directly, for example its LAN address. Probing the public name of a host behind a CDN proxy returns the proxy's Certificate, not Caddy's. Without the variable the tab shows what the config says and how to enable probing. See [ADR 0003](docs/adr/0003-tls-visibility-by-probing.md).
 
+## History and alerts
+
+Fairway watches these **Subjects** and keeps a history of their **State** (ok, warning or down) for 30 days in `events.json` in `DATA_DIR`:
+
+- Caddy itself (does the admin API answer?),
+- each upstream that has an active health check in the Caddyfile (Caddy reports health only for those),
+- each Certificate the TLS probe checks, see [TLS probing](#tls-probing),
+- each host, when the opt-in host check is on (below).
+
+A State changes only after it has held for a while: about 15 seconds for Caddy and one minute for an upstream. A short blip never shows. The route drawer shows a timeline strip per host, the routes table a compact one, and the Events tab lists everything. A stretch in which Fairway was not running shows as unknown, never as down.
+
+Alerts are push messages through [ntfy](https://ntfy.sh). Set `NTFY_URL` to the full address of a topic (for example `https://ntfy.example.test/fairway`; several can be separated by commas) and, if the topic needs a login, `NTFY_TOKEN`. Fairway POSTs the message text with a title, a priority (high for something down or a refused Deploy) and an emoji tag.
+
+These variables are the defaults. **Settings › Alerts** changes them without a restart and keeps your changes in `alert-settings.json` in `DATA_DIR`, where they win until you reset them:
+
+- **Topics:** add more, each with its own token, switch each on or off and send a test to one. Topics from the environment can be switched off but not edited or removed. Addresses and tokens are never shown again after you save them.
+- **What sends an Alert** (Settings › Alerts): a switch for Caddy not answering, a refused Deploy, an outside edit and a Rollback (off by default), plus recovery messages and the flapping message with its limits.
+- **How long a problem must last** (Settings › Monitoring): how long Caddy and upstreams must fail before they count as down. A shorter blip never shows in the history or sends an Alert.
+- **Public address** (Settings › General): `PUBLIC_URL` is its default. It makes each message open Fairway when tapped.
+- **Which hosts send Alerts:** none do until you switch them on, in the route drawer on the Routes page. A host's switch has a menu to pick what it sends for (its Certificate, the host check, the upstreams it uses) and to snooze it for an hour or a day. An upstream shared by several hosts alerts while any of them is on, and its message names them. Caddy itself, a refused Deploy and an outside edit are not about a host and follow the switches above. A host that leaves the Caddyfile keeps its settings. Muted hosts are still watched: the history and timeline record everything.
+- Adding, changing or removing a topic address or token needs login (see [Login](#login)); without it only the switches, the timing and switching topics on or off can be changed. Anyone who can reach an open Fairway could otherwise point its requests anywhere.
+
+- Sent for: a Certificate turning amber or red, an upstream or Caddy going down, the recovery of each, a Deploy that Caddy refused, and a Caddyfile that was changed outside Fairway. A Rollback only appears in the history.
+- Each bad State is sent once. A Subject that changes State more than 4 times in an hour sends one `flapping` message and is held until it has been stable for 30 minutes.
+- A failed delivery is retried after 10 seconds, 1 minute and 5 minutes, then marked "not delivered" in the Events tab. Nothing is queued.
+- `PUBLIC_URL` makes each message open Fairway when tapped. The topic address and the token are never shown in the interface; use **Send test** (in Settings or the Events tab) to check them.
+- With `HOST_CHECK=1` (and `TLS_PROBE_ADDR`), Fairway also requests `/` of each probed host every 5 minutes through Caddy and counts a connection error, a timeout of 10 seconds, or a 502, 503 or 504 as down (two in a row). Other statuses count as up. This catches an app that fails behind a proxy with no health check. It sends real requests to your hosts, so it is off by default. See [ADR 0006](docs/adr/0006-events-and-alerts-from-one-log.md).
+
 ## Login
 
 Fairway has one **Owner**. Set `AUTH_USER` and either `AUTH_PASSWORD` or `AUTH_PASSWORD_HASH` in `.env` and every page and API route asks for that login (only the sign-in page itself is public). Sessions last 12 hours since the last activity and at most 7 days; changing the password or hash signs everyone out. Failed sign-ins are answered more and more slowly (up to 5 seconds) but never lock you out.
@@ -106,10 +134,14 @@ Fairway has one **Owner**. Set `AUTH_USER` and either `AUTH_PASSWORD` or `AUTH_P
 | --- | --- | --- |
 | `ADMIN_SOCKET` | `/run/caddy-admin/admin.sock` | Caddy admin API socket |
 | `CADDYFILE_PATH` | `/caddyfile/Caddyfile` | The mounted Caddyfile |
-| `DATA_DIR` | `/data` | Original, Revisions, the login secret and the traffic history (`metrics.json`). Mount it as a volume to keep them across restarts |
+| `DATA_DIR` | `/data` | Original, Revisions, the login secret, the traffic history (`metrics.json`) and the event history (`events.json`) and the alert settings you changed (`alert-settings.json`). Mount it as a volume to keep them across restarts |
 | `LOG_DIR`, `LOG_FILE` | `/var/log/caddy`, `access.log` | Where Caddy writes its JSON log. The TLS tab's last issuance error needs Caddy's default logger (not only access logs) to write here. |
 | `MAX_REVISIONS` | `50` | Deployed Revisions kept |
 | `AUTH_USER`, `AUTH_PASSWORD` | unset | The Owner's login, see [Login](#login). Both, or neither |
 | `AUTH_PASSWORD_HASH` | unset | A scrypt hash instead of `AUTH_PASSWORD`; wins when both are set |
 | `TRUST_PROXY` | unset | Comma separated proxy addresses or CIDR ranges whose `X-Forwarded-*` headers are believed |
+| `NTFY_URL` | unset | ntfy topic address(es), comma separated, for Alerts, see [History and alerts](#history-and-alerts). Treat as a secret |
+| `NTFY_TOKEN` | unset | Access token for the topic, if it needs a login |
+| `PUBLIC_URL` | unset | Fairway's own address, makes each Alert open Fairway when tapped |
+| `HOST_CHECK` | unset | `1` turns on the request-per-host check; needs `TLS_PROBE_ADDR` |
 | `TLS_PROBE_ADDR` | unset | Caddy's HTTPS address as the editor reaches it, `host` or `host:port` (port defaults to 443), e.g. `192.0.2.10:443`. Turns on Certificate probing in the TLS tab, see below |

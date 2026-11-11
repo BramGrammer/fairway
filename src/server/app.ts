@@ -3,19 +3,25 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { join } from "node:path";
 import { createAuth, parseTrustProxy } from "./auth.js";
+import { AlertSettings, type Patch, type RouteMap, type TopicPatch } from "./alert-settings.js";
+import { parseNtfyUrls } from "./alerts.js";
 import { CaddyAdmin } from "./caddy-admin.js";
 import type { Config } from "./config.js";
 import { DeployError, Deployer } from "./deploy.js";
+import { HostCheck } from "./host-check.js";
+import { EventTracker, type SubjectKind } from "./events.js";
 import { formatCaddyfile } from "./format.js";
 import { parseHostLines, readHostLog, resolutionKey, resolveHostLogFile } from "./host-logs.js";
 import { LogFollower, tailLines } from "./logs.js";
 import { MetricsTracker, WINDOWS_MS } from "./metrics.js";
+import { buildRouteMap } from "./route-map.js";
 import { summarizeRoutes } from "./routes.js";
 import { Store } from "./store.js";
 import { lastIssuanceError } from "./issuance.js";
 import { summarizeTls } from "./tls.js";
 import { probeEligibility, TlsProber } from "./tls-probe.js";
 import { TlsSweep } from "./tls-sweep.js";
+import { upstreamKey, Watcher } from "./watcher.js";
 
 /** How often a host log stream re-reads the config, and how often it sends a keep-alive. */
 const RESOLVE_CHECK_MS = 3_000;
@@ -28,9 +34,38 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
   await metrics.load();
   metrics.start();
   onShutdown.push(() => metrics.save());
+  // The environment gives the alert settings their defaults; what the Owner changes in the interface wins.
+  const alertSettings = new AlertSettings(
+    { ntfyUrls: parseNtfyUrls(config.ntfyUrl), ntfyToken: config.ntfyToken, publicUrl: config.publicUrl },
+    join(config.dataDir, "alert-settings.json"),
+  );
+  await alertSettings.load();
+  const events = new EventTracker({ file: join(config.dataDir, "events.json") });
+  // Which hosts use which upstream, so an upstream's Alert can be left out when none of its hosts want one.
+  let routeMap: RouteMap = { upstreamHosts: new Map() };
+  const refreshRouteMap = async () => {
+    const servers = await admin.liveServers();
+    if (servers.ok) routeMap = buildRouteMap(servers.servers); // otherwise keep what we knew
+  };
+  await refreshRouteMap();
+  setInterval(() => void refreshRouteMap(), 60_000).unref(); // a Deploy refreshes it at once
+  const applyAlertSettings = () => {
+    const { publicUrl, policy } = alertSettings.effective();
+    events.configure({ sender: alertSettings.sender(), publicUrl, policy, scope: alertSettings.scope(() => routeMap) });
+  };
+  applyAlertSettings();
+  alertSettings.onChange(applyAlertSettings);
+  await events.load();
+  events.start();
+  onShutdown.push(() => events.save());
+  const watcher = new Watcher(events, {
+    ping: () => admin.ping(),
+    metricsText: () => admin.metricsText().catch(() => null),
+  });
+  watcher.start();
   const store = new Store(config.dataDir, config.maxRevisions);
   await store.init();
-  const deployer = new Deployer(config.caddyfilePath, admin, store);
+  const deployer = new Deployer(config.caddyfilePath, admin, store, events);
   await deployer.ensureOriginal();
 
   const auth = await createAuth({
@@ -152,20 +187,103 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
     return result.ok ? c.json(result) : c.json(result, 502);
   });
 
+  const listProbeHosts = async () => {
+    const servers = await admin.liveServers();
+    if (!servers.ok) throw new Error(servers.error);
+    const tls = await admin.liveTls();
+    return summarizeTls(servers.servers, tls.ok ? tls.tls : {})
+      .flatMap((site) => site.hosts)
+      .filter((h) => probeEligibility(h.host, h.state) === null)
+      .map((h) => h.host);
+  };
   const prober = new TlsProber({ addr: config.tlsProbeAddr });
   const sweep = new TlsSweep({
     prober,
-    listHosts: async () => {
-      const servers = await admin.liveServers();
-      if (!servers.ok) throw new Error(servers.error);
-      const tls = await admin.liveTls();
-      return summarizeTls(servers.servers, tls.ok ? tls.tls : {})
-        .flatMap((site) => site.hosts)
-        .filter((h) => probeEligibility(h.host, h.state) === null)
-        .map((h) => h.host);
+    listHosts: listProbeHosts,
+    onSwept: (hosts) => {
+      for (const [host, result] of Object.entries(hosts)) {
+        events.observe(`cert:${host}`, result.severity === "ok" ? "ok" : result.severity === "amber" ? "warning" : "down", result.reasons.join("; ") || undefined);
+      }
+      events.sync("cert" satisfies SubjectKind, Object.keys(hosts).map((host) => `cert:${host}`));
     },
   });
   void sweep.start();
+  void new HostCheck({ addr: config.tlsProbeAddr, enabled: config.hostCheck, listHosts: listProbeHosts, events }).start();
+  // History: newest first, optionally for one Subject.
+  app.get("/api/events", (c) => {
+    const subject = c.req.query("subject") || undefined;
+    const limit = Math.min(Math.max(Number(c.req.query("limit")) || 200, 1), 500);
+    return c.json({ ok: true, alerts: events.alertsEnabled, events: events.list({ subject, limit }) });
+  });
+
+  // Per host: the worst State among its Certificate, its synthetic check and its upstreams over a window.
+  app.get("/api/events/timeline", async (c) => {
+    const seconds = Number(c.req.query("window"));
+    const windowMs = (Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 30 * 86_400) : 86_400) * 1000;
+    const servers = await admin.liveServers();
+    if (!servers.ok) return c.json({ ok: false, error: servers.error }, 502);
+    const to = Date.now();
+    const from = to - windowMs;
+    const hosts: Record<string, ReturnType<EventTracker["timeline"]>> = {};
+    for (const site of summarizeRoutes(servers.servers)) {
+      const upstreams = site.rules.flatMap((rule) => rule.destinations.flatMap((d) => d.upstreams ?? [])).map(upstreamKey);
+      for (const host of site.hosts) hosts[host] = events.timeline([`cert:${host}`, `host:${host}`, ...upstreams], from, to);
+    }
+    return c.json({ ok: true, from, to, hosts });
+  });
+
+  // Whether alerting is on, never where it goes.
+  app.get("/api/alerts", (c) => c.json({ ok: true, enabled: events.alertsEnabled }));
+  // With a topic id it tests just that topic, even when it is switched off.
+  app.post("/api/alerts/test", async (c) => {
+    const { id } = await c.req.json<{ id?: unknown }>().catch(() => ({ id: undefined }));
+    if (typeof id === "string") {
+      const sender = alertSettings.senderFor(id);
+      if (!sender) return c.json({ ok: false, error: "No such topic." }, 404);
+      const result = await events.sendTest(undefined, sender);
+      return c.json(result, result.ok ? 200 : 502);
+    }
+    const result = await events.sendTest();
+    return c.json(result, result.ok ? 200 : 502);
+  });
+
+  // The alert settings. Topic addresses and tokens can be written but never read back, and with no login
+  // they cannot be written either: anyone who can reach the page could send Alerts, and Fairway's requests, anywhere.
+  const needsLogin = () => ({ ok: false as const, error: "Sign in is required to change where Alerts go. Set AUTH_USER and a password first." });
+  const settingsView = () => ({ ok: true as const, canEditSecrets: auth.enabled, ...alertSettings.view(auth.enabled) });
+  const answer = (result: { ok: boolean }) => (result.ok ? 200 : 400);
+
+  app.get("/api/settings/alerts", (c) => c.json(settingsView()));
+
+  app.put("/api/settings/alerts", async (c) => {
+    const body = await c.req.json<Patch>().catch(() => null);
+    if (!body || typeof body !== "object") return c.json({ ok: false, error: "Send a JSON object." }, 400);
+    const result = await alertSettings.patch({ triggers: body.triggers, timing: body.timing, publicUrl: body.publicUrl, hosts: body.hosts });
+    return result.ok ? c.json(settingsView()) : c.json(result, answer(result));
+  });
+
+  app.post("/api/settings/alerts/topics", async (c) => {
+    if (!auth.enabled) return c.json(needsLogin(), 403);
+    const body = await c.req.json<{ name: string; url: string; token?: string | null }>().catch(() => null);
+    if (!body || typeof body !== "object") return c.json({ ok: false, error: "Send a JSON object." }, 400);
+    const result = await alertSettings.addTopic(body);
+    return result.ok ? c.json({ ...settingsView(), id: result.id }) : c.json(result, answer(result));
+  });
+
+  app.patch("/api/settings/alerts/topics/:id", async (c) => {
+    const body = await c.req.json<TopicPatch>().catch(() => null);
+    if (!body || typeof body !== "object") return c.json({ ok: false, error: "Send a JSON object." }, 400);
+    if (!auth.enabled && (body.url !== undefined || body.token !== undefined)) return c.json(needsLogin(), 403);
+    const result = await alertSettings.updateTopic(c.req.param("id"), { name: body.name, url: body.url, token: body.token, enabled: body.enabled });
+    return result.ok ? c.json(settingsView()) : c.json(result, result.error === "No such topic." ? 404 : 400);
+  });
+
+  app.delete("/api/settings/alerts/topics/:id", async (c) => {
+    if (!auth.enabled) return c.json(needsLogin(), 403);
+    const result = await alertSettings.removeTopic(c.req.param("id"));
+    return result.ok ? c.json(settingsView()) : c.json(result, result.error === "No such topic." ? 404 : 400);
+  });
+
   app.get("/api/tls/status", (c) => c.json(sweep.snapshot()));
   app.get("/api/tls/probe", async (c) => {
     if (!prober.enabled) return c.json({ ok: true, enabled: false });
@@ -196,6 +314,7 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
   const runDeploy = async (run: () => ReturnType<Deployer["deploy"]>) => {
     try {
       const result = await run();
+      void refreshRouteMap();
       return { status: 200 as const, body: { ok: true, ...result, hash: result.revision.hash } };
     } catch (error) {
       if (error instanceof DeployError) {

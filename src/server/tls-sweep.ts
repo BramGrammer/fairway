@@ -22,6 +22,8 @@ interface SweepOptions {
   /** The hosts the probe rules allow (see `probeEligibility`). */
   listHosts: () => Promise<string[]>;
   now?: () => number;
+  /** Called with every finished sweep's results. */
+  onSwept?: (hosts: Record<string, SweepHost>) => void;
   /** Calls `fn` every `ms` until the returned function is called. */
   schedule?: (fn: () => void, ms: number) => () => void;
 }
@@ -86,5 +88,6 @@ export class TlsSweep {
     }
     this.hosts = next;
     this.sweptAt = new Date((this.options.now ?? Date.now)()).toISOString();
+    this.options.onSwept?.(next);
   }
 }

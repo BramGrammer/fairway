@@ -12,6 +12,12 @@ x-editor: &editor
     DATA_DIR: /data
     # Where to reach Caddy's HTTPS port from this container, to show served Certificates (see README).
     TLS_PROBE_ADDR: ${TLS_PROBE_ADDR:-}
+    # Set to 1 to request each host every 5 minutes and report 502/503/504 as down (needs TLS_PROBE_ADDR).
+    HOST_CHECK: ${HOST_CHECK:-}
+    # ntfy topic address(es) for Alerts (see README). Secrets: keep them out of the repo. PUBLIC_URL adds a link to each Alert.
+    NTFY_URL: ${NTFY_URL:-}
+    NTFY_TOKEN: ${NTFY_TOKEN:-}
+    PUBLIC_URL: ${PUBLIC_URL:-}
     # The Owner's login (see README). Leave AUTH_USER empty to run without a login.
     AUTH_USER: ${AUTH_USER:-}
     AUTH_PASSWORD: ${AUTH_PASSWORD:-}

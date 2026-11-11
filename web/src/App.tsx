@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
 import {
+  ActivityIcon,
   CircleAlertIcon,
   CircleCheckIcon,
   FileCodeIcon,
@@ -7,6 +8,7 @@ import {
   MoonIcon,
   RouteIcon,
   ScrollTextIcon,
+  SettingsIcon,
   ShieldAlertIcon,
   SunIcon,
   type LucideIcon,
@@ -46,9 +48,11 @@ import { TopBarSlotProvider } from "@/components/top-bar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { onShowInEditor } from "@/lib/show-in-editor"
 import { EditorTab } from "@/features/editor-tab"
+import { EventsTab } from "@/features/events-tab"
 import { HistoryTab } from "@/features/history-tab"
 import { LogsTab } from "@/features/logs-tab"
 import { RoutesTab } from "@/features/routes-tab"
+import { SettingsDialog } from "@/features/settings-dialog"
 import { useCaddyfile } from "@/hooks/use-caddyfile"
 import { useIsDark } from "@/hooks/use-is-dark"
 import { LoginView } from "@/components/login-form"
@@ -57,12 +61,13 @@ import { api, onSessionLost, type StatusInfo } from "@/lib/api"
 import { LoginRequiredContext } from "@/lib/login-context"
 import { decideGate, type AuthStatus, type Gate } from "@/lib/auth"
 
-type View = "editor" | "routes" | "history" | "logs"
+type View = "editor" | "routes" | "history" | "events" | "logs"
 
 const NAV: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "editor", label: "Editor", icon: FileCodeIcon },
   { id: "routes", label: "Routes", icon: RouteIcon },
   { id: "history", label: "History", icon: HistoryIcon },
+  { id: "events", label: "Events", icon: ActivityIcon },
   { id: "logs", label: "Logs", icon: ScrollTextIcon },
 ]
 
@@ -142,6 +147,7 @@ function ThemeMenuItem() {
 function Editor({ user, onLogout }: { user: string | null; onLogout: () => void }) {
   const [view, setView] = useState<View>(initialView)
   const [topBarSlot, setTopBarSlot] = useState<HTMLElement | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const caddyfile = useCaddyfile()
   const status = useStatus()
 
@@ -195,6 +201,12 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
           <StatusBadges status={status} />
           <SidebarMenu>
             <ThemeMenuItem />
+            <SidebarMenuItem>
+              <SidebarMenuButton tooltip="Settings" onClick={() => setSettingsOpen(true)}>
+                <SettingsIcon />
+                <span>Settings</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
           </SidebarMenu>
           {user !== null && <UserMenu user={user} onLogout={onLogout} />}
         </SidebarFooter>
@@ -261,11 +273,18 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
           </div>
         )}
 
+        {view === "events" && (
+          <div className="min-h-0 flex-1">
+            <EventsTab />
+          </div>
+        )}
+
         <div hidden={view !== "logs"} className="min-h-0 flex-1">
           <LogsTab active={view === "logs"} />
         </div>
         </TopBarSlotProvider>
       </SidebarInset>
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} user={user} />
     </SidebarProvider>
   )
 }
