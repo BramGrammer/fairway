@@ -5,6 +5,7 @@ import {
   ScrollTextIcon,
   SearchIcon,
   Trash2Icon,
+  XIcon,
 } from "lucide-react"
 
 import { ToolbarAction, ToolbarToggle } from "@/components/toolbar-action"
@@ -20,6 +21,7 @@ import {
 import {
   InputGroup,
   InputGroupAddon,
+  InputGroupButton,
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -183,11 +185,23 @@ export function LogsTab({ active }: { active: boolean }) {
                 <SearchIcon />
               </InputGroupAddon>
               <InputGroupInput
-                type="search"
+                type="text"
+                role="searchbox"
+                inputMode="search"
+                enterKeyHint="search"
                 placeholder="Search logs"
+                aria-label="Search logs"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
+                onKeyDown={(event) => event.key === "Escape" && setSearch("")}
               />
+              {search && (
+                <InputGroupAddon align="inline-end">
+                  <InputGroupButton size="icon-xs" aria-label="Clear search" onClick={() => setSearch("")}>
+                    <XIcon />
+                  </InputGroupButton>
+                </InputGroupAddon>
+              )}
             </InputGroup>
             <Divider />
             <Select items={LEVELS} value={level} onValueChange={(value) => value && setLevel(value)}>

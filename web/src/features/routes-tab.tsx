@@ -124,12 +124,17 @@ export function RoutesTab({ editorText }: RoutesTabProps) {
           <InputGroupAddon>
             <SearchIcon />
           </InputGroupAddon>
+          {/* A plain text field: `type="search"` would add the browser's own clear button next to ours. */}
           <InputGroupInput
-            type="search"
+            type="text"
+            role="searchbox"
+            inputMode="search"
+            enterKeyHint="search"
             placeholder="Search hosts, upstreams, middleware"
             aria-label="Search routes"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
+            onKeyDown={(event) => event.key === "Escape" && setSearch("")}
           />
           {search && (
             <InputGroupAddon align="inline-end">
