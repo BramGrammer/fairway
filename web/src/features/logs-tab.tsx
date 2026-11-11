@@ -7,9 +7,9 @@ import {
   Trash2Icon,
 } from "lucide-react"
 
+import { ToolbarAction, ToolbarToggle } from "@/components/toolbar-action"
 import { TopBar } from "@/components/top-bar"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import {
   Empty,
   EmptyDescription,
@@ -32,7 +32,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
-import { Toggle } from "@/components/ui/toggle"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { api, openStream } from "@/lib/api"
 import { PRESSED } from "@/lib/toggle-styles"
@@ -105,6 +104,11 @@ function StatusBadge({ entry }: { entry: LogEntry }) {
   }
   const variant = entry.level === "error" || entry.level === "fatal" ? "destructive" : entry.level === "warn" ? "default" : "outline"
   return <Badge variant={variant} className="w-12 justify-center">{entry.level}</Badge>
+}
+
+/** A thin vertical line between the groups of the top bar. */
+function Divider() {
+  return <Separator orientation="vertical" className="mx-1 data-vertical:h-6 data-vertical:self-auto" />
 }
 
 /** `active` is true while the tab is visible; the panel stays mounted so the stream keeps running. */
@@ -185,6 +189,7 @@ export function LogsTab({ active }: { active: boolean }) {
                 onChange={(event) => setSearch(event.target.value)}
               />
             </InputGroup>
+            <Divider />
             <Select items={LEVELS} value={level} onValueChange={(value) => value && setLevel(value)}>
               <SelectTrigger className="w-44">
                 <SelectValue />
@@ -199,6 +204,7 @@ export function LogsTab({ active }: { active: boolean }) {
                 </SelectGroup>
               </SelectContent>
             </Select>
+            <Divider />
             <ToggleGroup
               variant="outline"
               spacing={0}
@@ -216,31 +222,32 @@ export function LogsTab({ active }: { active: boolean }) {
             </ToggleGroup>
           </div>
 
-          <Separator orientation="vertical" className="mx-1 data-vertical:h-6 data-vertical:self-auto" />
+          <Divider />
 
           <div className="flex items-center gap-1">
-            <Toggle variant="outline" className={PRESSED} pressed={paused} onPressedChange={setPausedTo} aria-label="Pause the live stream">
+            <ToolbarToggle
+              label={paused ? "Resume the live stream" : "Pause the live stream"}
+              pressed={paused}
+              onPressedChange={setPausedTo}
+            >
               <PauseIcon />
-              Pause
-            </Toggle>
-            <Toggle variant="outline" className={PRESSED} pressed={follow} onPressedChange={setFollow} aria-label="Follow new entries">
+            </ToolbarToggle>
+            <ToolbarToggle label="Follow new entries" pressed={follow} onPressedChange={setFollow}>
               <ArrowDownToLineIcon />
-              Follow
-            </Toggle>
+            </ToolbarToggle>
           </div>
 
-          <Separator orientation="vertical" className="mx-1 data-vertical:h-6 data-vertical:self-auto" />
+          <Divider />
 
-          <Button
-            variant="ghost"
+          <ToolbarAction
+            label="Clear the list"
             onClick={() => {
               setEntries([])
               pending.current = []
             }}
           >
-            <Trash2Icon data-icon="inline-start" />
-            Clear
-          </Button>
+            <Trash2Icon />
+          </ToolbarAction>
         </TopBar>
       )}
 
