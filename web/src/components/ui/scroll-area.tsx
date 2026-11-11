@@ -2,15 +2,21 @@ import * as React from "react"
 import { ScrollArea as ScrollAreaPrimitive } from "@base-ui/react/scroll-area"
 import { cn } from "cn"
 
+const AUTO_HIDE = "opacity-0 transition-opacity duration-200 data-hovering:opacity-100 data-scrolling:opacity-100"
+
 function ScrollArea({
   className,
   children,
   horizontal = false,
+  autoHide = false,
   ...props
 }: ScrollAreaPrimitive.Root.Props & {
   /** Also show a horizontal scrollbar when the content is wider than the area. */
   horizontal?: boolean
+  /** Show the scrollbars only while hovering over the area or scrolling it. */
+  autoHide?: boolean
 }) {
+  const barClass = autoHide ? AUTO_HIDE : undefined
   return (
     <ScrollAreaPrimitive.Root
       data-slot="scroll-area"
@@ -23,8 +29,8 @@ function ScrollArea({
       >
         {children}
       </ScrollAreaPrimitive.Viewport>
-      <ScrollBar />
-      {horizontal && <ScrollBar orientation="horizontal" />}
+      <ScrollBar className={barClass} />
+      {horizontal && <ScrollBar orientation="horizontal" className={barClass} />}
       <ScrollAreaPrimitive.Corner />
     </ScrollAreaPrimitive.Root>
   )

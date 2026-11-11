@@ -1,12 +1,7 @@
 import type { ReactNode } from "react"
 import {
-  ArrowRightIcon,
-  CircleQuestionMarkIcon,
-  CornerDownRightIcon,
-  FolderIcon,
   GlobeIcon,
   LayersIcon,
-  MessageSquareIcon,
   RouteIcon,
   ServerIcon,
   type LucideIcon,
@@ -17,20 +12,13 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Separator } from "@/components/ui/separator"
 import { Table, TableBody, TableHeader, TableHead, TableCell, TableRow } from "@/components/ui/table"
 import { FlowStrip, type FlowItem } from "@/features/flow-strip"
+import { DEST_ICONS } from "@/features/routes-shared"
 import { LinkActions } from "@/features/route-links-view"
 import { describeNode, destLabel, type OverviewData } from "@/features/route-overview"
 import { HealthStatus } from "@/features/health-dot"
 import type { Chip, Destination } from "@/lib/api"
 import { hostLinks, ruleLinks, upstreamLink } from "@/lib/route-links"
 import { upstreamHealth, type UpstreamsReply } from "@/lib/upstream-health"
-
-const DEST_ICONS: Record<string, LucideIcon> = {
-  proxy: ArrowRightIcon,
-  file: FolderIcon,
-  redirect: CornerDownRightIcon,
-  respond: MessageSquareIcon,
-  other: CircleQuestionMarkIcon,
-}
 
 /** A drawer card: icon tile, title and description in the header, an optional action on the right. */
 function Panel({
@@ -124,7 +112,7 @@ function DestLines({ items, health }: { items: { label: string; dest: Destinatio
     <ul className="flex flex-col gap-1.5">
       {items.map((item, i) => {
         const link = item.dest.kind === "proxy" ? upstreamLink(item.label) : null
-        const Icon = DEST_ICONS[item.dest.kind] ?? CircleQuestionMarkIcon
+        const Icon = DEST_ICONS[item.dest.kind]
         return (
           <li key={`${item.label}|${i}`} className="flex items-center gap-2">
             <Icon className="size-4 shrink-0 text-primary" />
@@ -391,7 +379,7 @@ export function RouteOverview({ data, id, onOpen, health, rate = null, traffic, 
           <Insights traffic={traffic} tls={tls} />
           <Cards>
             <Panel
-              icon={DEST_ICONS[view.dest.kind] ?? ServerIcon}
+              icon={DEST_ICONS[view.dest.kind]}
               title={destLabel(view.dest)}
               mono
               description={`${view.dest.kind[0].toUpperCase()}${view.dest.kind.slice(1)} destination`}

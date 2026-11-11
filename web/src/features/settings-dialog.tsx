@@ -1,4 +1,5 @@
 import { useState } from "react"
+import type { SettingsCategory } from "@/lib/router"
 import { ActivityIcon, BellIcon, SettingsIcon, ShieldAlertIcon, ShieldCheckIcon, type LucideIcon } from "lucide-react"
 
 import { AlertSettingsPanel } from "@/features/alert-settings-panel"
@@ -29,7 +30,7 @@ import {
   SidebarProvider,
 } from "@/components/ui/sidebar"
 
-export type SettingsCategory = "general" | "monitoring" | "alerts" | "access"
+export type { SettingsCategory }
 
 const CATEGORIES: Array<{ id: SettingsCategory; label: string; icon: LucideIcon; description: string }> = [
   { id: "general", label: "General", icon: SettingsIcon, description: "This Fairway and this browser." },
@@ -106,22 +107,27 @@ function AccessSettings({ user }: { user: string | null }) {
 
 /** Settings in a dialog with a nested sidebar of categories. */
 export function SettingsDialog({
-  open,
-  onOpenChange,
+  category,
+  onCategoryChange,
+  onClose,
   user,
-  initial = "general",
 }: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
+  /** The open category, or null while the dialog is closed. */
+  category: SettingsCategory | null
+  onCategoryChange: (category: SettingsCategory) => void
+  onClose: () => void
   /** The signed-in Owner, or null when Fairway runs without a login. */
   user: string | null
-  initial?: SettingsCategory
 }) {
-  const [active, setActive] = useState<SettingsCategory>(initial)
+  // The last open category stays on screen while the dialog fades out.
+  const [shown, setShown] = useState<SettingsCategory>(category ?? "general")
+  if (category !== null && category !== shown) setShown(category)
+  const active = shown
+  const setActive = onCategoryChange
   const current = CATEGORIES.find((category) => category.id === active)!
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={category !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent
         className="flex h-[85vh] max-h-[640px] max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[820px]"
       >

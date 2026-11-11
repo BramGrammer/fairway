@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { clampDrawerWidth, DRAWER_STORAGE_KEY, parseStoredWidth } from "@/lib/route-drawer"
 
@@ -24,12 +25,14 @@ interface SideDrawerProps {
   tabs?: ReactNode
   /** No padding around the body, for content that runs edge to edge, such as a table. */
   flush?: boolean
+  /** The content lays itself out to the height of the drawer and scrolls what needs scrolling; the body does not scroll. */
+  fill?: boolean
   onClose: () => void
   children: ReactNode
 }
 
 /** Non-modal panel laid over the right edge of its parent, which must be positioned. Resizable, and Escape closes it. */
-export function SideDrawer({ label, title, actions, tabs, flush = false, onClose, children }: SideDrawerProps) {
+export function SideDrawer({ label, title, actions, tabs, flush = false, fill = false, onClose, children }: SideDrawerProps) {
   const ref = useRef<HTMLElement>(null)
   const [width, setWidth] = useState(readWidth)
 
@@ -116,7 +119,13 @@ export function SideDrawer({ label, title, actions, tabs, flush = false, onClose
         </div>
       </div>
       {tabs}
-      <div className={cn("min-h-0 flex-1 overflow-auto", !flush && "px-5 py-4")}>{children}</div>
+      {fill ? (
+        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+      ) : (
+        <ScrollArea className="min-h-0 flex-1">
+          <div className={cn(!flush && "px-5 py-4")}>{children}</div>
+        </ScrollArea>
+      )}
     </section>
   )
 }

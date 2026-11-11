@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import {
   CircleAlertIcon,
@@ -22,9 +22,11 @@ import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Kbd, KbdGroup } from "@/components/ui/kbd"
 import { ShortcutsPopover } from "@/components/shortcuts-popover"
+import { ToolbarAction } from "@/components/toolbar-action"
 import { altKey, modKey, shiftKey } from "@/lib/keys"
 import { TopBar, TopBarTitle } from "@/components/top-bar"
 import { Spinner } from "@/components/ui/spinner"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   api,
@@ -62,44 +64,6 @@ interface Notice {
   body?: string
 }
 
-
-/** An icon-only button of the top bar; its name, and its shortcut if it has one, show in a tooltip. */
-function ToolbarAction({
-  label,
-  keys,
-  variant = "outline",
-  disabled,
-  onClick,
-  children,
-}: {
-  label: string
-  keys?: string[]
-  variant?: "outline" | "ghost"
-  disabled?: boolean
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <Tooltip>
-      {/* The span keeps the tooltip working while the button is disabled. */}
-      <TooltipTrigger render={<span className="inline-flex" />}>
-        <Button variant={variant} size="icon" aria-label={label} onClick={onClick} disabled={disabled}>
-          {children}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>
-        {label}
-        {keys && (
-          <KbdGroup>
-            {keys.map((key) => (
-              <Kbd key={key}>{key}</Kbd>
-            ))}
-          </KbdGroup>
-        )}
-      </TooltipContent>
-    </Tooltip>
-  )
-}
 
 export function EditorTab({
   active,
@@ -298,13 +262,15 @@ export function EditorTab({
       {notice && (
         <Alert
           variant={notice.kind === "error" ? "destructive" : "default"}
-          className="max-h-48 shrink-0 overflow-auto rounded-none border-x-0 border-t-0"
+          className="shrink-0 rounded-none border-x-0 border-t-0"
         >
           {notice.kind === "error" ? <CircleAlertIcon /> : <CircleCheckIcon />}
           <AlertTitle>{notice.title}</AlertTitle>
           {notice.body && (
             <AlertDescription className="font-mono text-xs whitespace-pre-wrap">
-              {notice.body}
+              <ScrollArea autoHide className="max-h-40">
+                {notice.body}
+              </ScrollArea>
             </AlertDescription>
           )}
         </Alert>
@@ -370,16 +336,18 @@ export function EditorTab({
               <TriangleAlertIcon className="size-4 shrink-0" />
               {toConfirm.length === 1 ? "1 warning" : `${toConfirm.length} warnings`}
             </div>
-            <ul className="flex max-h-32 flex-col gap-1 overflow-auto text-xs">
-              {toConfirm.map((finding, index) => (
-                <li key={index} className="flex flex-wrap gap-x-2">
-                  {finding.line !== undefined && (
-                    <span className="font-mono text-muted-foreground">Line {finding.line}</span>
-                  )}
-                  <span className="min-w-0 break-words">{finding.message}</span>
-                </li>
-              ))}
-            </ul>
+            <ScrollArea autoHide className="max-h-32">
+              <ul className="flex flex-col gap-1 text-xs">
+                {toConfirm.map((finding, index) => (
+                  <li key={index} className="flex flex-wrap gap-x-2">
+                    {finding.line !== undefined && (
+                      <span className="font-mono text-muted-foreground">Line {finding.line}</span>
+                    )}
+                    <span className="min-w-0 break-words">{finding.message}</span>
+                  </li>
+                ))}
+              </ul>
+            </ScrollArea>
             <label className="flex cursor-pointer items-center gap-2 pt-1 text-sm">
               <Checkbox checked={seenWarnings} onCheckedChange={(checked) => setSeenKey(checked === true ? confirmKey : null)} />
               I&apos;ve seen {toConfirm.length === 1 ? "this" : "these"}

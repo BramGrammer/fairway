@@ -1,15 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
-  ArrowRightIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   ChevronsDownUpIcon,
   ChevronsUpDownIcon,
-  CircleQuestionMarkIcon,
-  CornerDownRightIcon,
-  FolderIcon,
   InfoIcon,
-  MessageSquareIcon,
   PinIcon,
   XIcon,
 } from "lucide-react"
@@ -17,15 +12,18 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ToolbarAction, ToolbarDivider } from "@/components/toolbar-action"
 import { Toggle } from "@/components/ui/toggle"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { GraphCanvas, type CanvasHandle } from "@/features/graph-canvas"
+import { useRouter } from "@/hooks/use-router"
 import { RouteDrawer } from "@/features/route-drawer"
 import { StepNode } from "@/features/step-node"
 import { TlsTab } from "@/features/tls-tab"
 import { TrafficTab } from "@/features/traffic-tab"
 import { RouteOverview } from "@/features/route-overview-view"
+import { DEST_ICONS, hostLabel, isDomain } from "@/features/routes-shared"
 import { useMetrics } from "@/hooks/use-metrics"
 import { useUpstreamHealth } from "@/hooks/use-upstream-health"
 import { HealthDot } from "@/features/health-dot"
@@ -45,14 +43,6 @@ import { estimateTraffic, mergeStats, trafficContributions } from "@/lib/traffic
 import { chipTexts, destTexts, hostTexts, matchesQuery } from "@/features/routes-filter"
 import { PRESSED } from "@/lib/toggle-styles"
 import { cn } from "@/lib/utils"
-
-const DEST_ICONS = {
-  proxy: ArrowRightIcon,
-  file: FolderIcon,
-  redirect: CornerDownRightIcon,
-  respond: MessageSquareIcon,
-  other: CircleQuestionMarkIcon,
-} as const
 
 const PAD = 16
 const SIDE_W = 240
@@ -136,8 +126,6 @@ interface Arranged {
 }
 
 const isHostNode = (id: string) => id.startsWith("host:") || id.startsWith("host-group:")
-const hostLabel = (host: string) => (host === "*" ? "any host" : host)
-const isDomain = (host: string) => /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host)
 const isInternal = (site: Site) => site.hosts.some((host) => host.includes(".int."))
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
@@ -582,7 +570,24 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
   const base = useMemo(() => arrange(raw, raw.paths), [raw])
 
   const [manualExpanded, setExpanded] = useState<Set<string>>(() => new Set())
-  const [pinned, setPinned] = useState<string | null>(null)
+  // The open drawer is kept in the URL (?node=...); a node that no longer exists is ignored.
+  const { params, openPanel, replaceParams, closePanel } = useRouter()
+  const nodeParam = params.node
+  const pinned =
+    nodeParam !== undefined &&
+    (raw.hosts.has(nodeParam) ||
+      raw.handlers.has(nodeParam) ||
+      raw.steps.has(nodeParam) ||
+      raw.dests.has(nodeParam) ||
+      [...base.hostGroups, ...base.destGroups].some((group) => group.id === nodeParam))
+      ? nodeParam
+      : null
+  /** Opening the drawer pushes a history entry, so Back closes it; moving to another node replaces. */
+  const setPinned = (id: string | null) => {
+    if (id === null) closePanel(["node"])
+    else if (nodeParam === undefined) openPanel({ node: id })
+    else if (id !== nodeParam) replaceParams({ node: id })
+  }
   /** Open groups that show every member instead of folding the rest into a "more" row. */
   const [showAll, setShowAll] = useState<Set<string>>(() => new Set())
   const [hovered, setHovered] = useState<string | null>(null)
@@ -934,10 +939,10 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
     setPinned(id)
   }
 
-  const closeDrawer = useCallback(() => {
+  const closeDrawer = () => {
     setPinned(null)
     setIsolate(false)
-  }, [])
+  }
 
   // The drawer covers the right of the canvas, so pan the selected node out from under it.
   useEffect(() => {
@@ -969,10 +974,14 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2">
-        <Button variant="ghost" size="sm" onClick={toggleAll} disabled={allGroups.length === 0}>
-          {allOpen ? <ChevronsDownUpIcon data-icon="inline-start" /> : <ChevronsUpDownIcon data-icon="inline-start" />}
-          {allOpen ? "Collapse all" : "Expand all"}
-        </Button>
+        <ToolbarAction
+          label={allOpen ? "Collapse all" : "Expand all"}
+          onClick={toggleAll}
+          disabled={allGroups.length === 0}
+        >
+          {allOpen ? <ChevronsDownUpIcon /> : <ChevronsUpDownIcon />}
+        </ToolbarAction>
+        <ToolbarDivider />
         <ToggleGroup
           variant="outline"
           spacing={0}
@@ -989,6 +998,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
         </ToggleGroup>
         {live && (
           <>
+            <ToolbarDivider />
             <ToggleGroup
               variant="outline"
               spacing={0}
@@ -1002,6 +1012,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
                 </ToggleGroupItem>
               ))}
             </ToggleGroup>
+            <ToolbarDivider />
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <span className="size-1.5 animate-pulse rounded-full bg-primary" />
               Live · {fmtRate(Object.values(live.hosts).reduce((sum, h) => sum + h.rate, 0))} ·{" "}
@@ -1012,7 +1023,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
           </>
         )}
         <div className="ml-auto flex items-center gap-2">
-          {pinned ? (
+          {pinned && (
             <>
               <Badge variant="secondary">
                 <PinIcon data-icon="inline-start" />
@@ -1039,10 +1050,6 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
                 Clear
               </Button>
             </>
-          ) : (
-            <span className="text-xs text-muted-foreground">
-              Click a box to pin its paths · use the arrow on a group to open it
-            </span>
           )}
         </div>
       </div>

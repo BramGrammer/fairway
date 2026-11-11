@@ -17,7 +17,7 @@ export interface EventRecord {
   delivery?: Delivery
 }
 
-export type EventsReply = { ok: true; alerts: boolean; events: EventRecord[] } | { ok: false; error?: string }
+export type EventsReply = { ok: true; events: EventRecord[] } | { ok: false; error?: string }
 export type AlertTestReply = { ok: true } | { ok: false; error: string }
 
 export const EVENT_STATE_LABELS: Record<StateName, string> = { ok: "Up", warning: "Degraded", down: "Down" }

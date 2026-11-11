@@ -2,20 +2,16 @@ import { useCallback, useEffect, useState } from "react"
 import {
   ActivityIcon,
   CircleAlertIcon,
-  CircleCheckIcon,
   FileCodeIcon,
   HistoryIcon,
-  MoonIcon,
   RouteIcon,
   ScrollTextIcon,
   SettingsIcon,
   ShieldAlertIcon,
-  SunIcon,
   type LucideIcon,
 } from "lucide-react"
 
-import { useTheme } from "@/components/theme-provider"
-import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
   Empty,
@@ -46,6 +42,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { FairwayLogo } from "@/components/fairway-logo"
 import { TopBarSlotProvider, TopBarTitleSlotProvider } from "@/components/top-bar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
 import { onShowInEditor } from "@/lib/show-in-editor"
 import { EditorTab } from "@/features/editor-tab"
 import { EventsTab } from "@/features/events-tab"
@@ -54,27 +51,22 @@ import { LogsTab } from "@/features/logs-tab"
 import { RoutesTab } from "@/features/routes-tab"
 import { SettingsDialog } from "@/features/settings-dialog"
 import { useCaddyfile } from "@/hooks/use-caddyfile"
-import { useIsDark } from "@/hooks/use-is-dark"
 import { LoginView } from "@/components/login-form"
 import { UserMenu } from "@/components/user-menu"
 import { api, onSessionLost, type StatusInfo } from "@/lib/api"
 import { LoginRequiredContext } from "@/lib/login-context"
+import { RouterProvider } from "@/components/router-provider"
+import { useRouter } from "@/hooks/use-router"
+import { pageTitle, type Page } from "@/lib/router"
 import { decideGate, type AuthStatus, type Gate } from "@/lib/auth"
 
-type View = "editor" | "routes" | "history" | "events" | "logs"
-
-const NAV: { id: View; label: string; icon: LucideIcon }[] = [
+const NAV: { id: Page; label: string; icon: LucideIcon }[] = [
   { id: "editor", label: "Editor", icon: FileCodeIcon },
   { id: "routes", label: "Routes", icon: RouteIcon },
   { id: "history", label: "History", icon: HistoryIcon },
   { id: "events", label: "Events", icon: ActivityIcon },
   { id: "logs", label: "Logs", icon: ScrollTextIcon },
 ]
-
-function initialView(): View {
-  const hash = window.location.hash.slice(1)
-  return NAV.some((item) => item.id === hash) ? (hash as View) : "editor"
-}
 
 function useStatus() {
   const [status, setStatus] = useState<StatusInfo | null>(null)
@@ -94,68 +86,66 @@ function useStatus() {
   return status
 }
 
-function StatusBadges({ status }: { status: StatusInfo | null }) {
-  if (!status) return null
+/** A dot for Caddy's state: green while it is reachable, a pulsing red when it is not. */
+function StatusDot({ status, className }: { status: StatusInfo | null; className?: string }) {
+  if (status === null) return null
+  const label = status.caddyReachable ? "Caddy connected" : "Caddy unreachable"
   return (
-    <div className="flex flex-col items-start gap-1.5 px-2 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:px-0">
-      {status.auth.mode === "none" && (
-        <Tooltip>
-          <TooltipTrigger render={<Badge variant="destructive" />}>
-            <ShieldAlertIcon data-icon="inline-start" />
-            <span className="group-data-[collapsible=icon]:hidden">No authentication</span>
-          </TooltipTrigger>
-          <TooltipContent side="right">
-            No authentication. Anyone who can reach this page can change your proxy. Fairway is meant for an internal network: restrict access at the network layer.
-          </TooltipContent>
-        </Tooltip>
-      )}
-      <Tooltip>
-        <TooltipTrigger render={<Badge variant={status.caddyReachable ? "secondary" : "destructive"} />}>
-          {status.caddyReachable ? (
-            <CircleCheckIcon data-icon="inline-start" />
-          ) : (
-            <CircleAlertIcon data-icon="inline-start" />
-          )}
-          <span className="group-data-[collapsible=icon]:hidden">
-            {status.caddyReachable ? "Caddy connected" : "Caddy unreachable"}
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="right">
-          {status.caddyReachable ? "Caddy connected" : "Caddy unreachable"}
-        </TooltipContent>
-      </Tooltip>
-    </div>
+    <Tooltip>
+      {/* The pseudo element widens the area that shows the tooltip beyond the small dot. */}
+      <TooltipTrigger
+        render={<span role="status" className={cn("relative flex size-2 shrink-0 after:absolute after:-inset-1.5", className)} />}
+      >
+        <span className="sr-only">{label}</span>
+        {!status.caddyReachable && (
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-destructive/60" />
+        )}
+        <span
+          className={cn("relative inline-flex size-full rounded-full", status.caddyReachable ? "bg-success" : "bg-destructive")}
+        />
+      </TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
   )
 }
 
-function ThemeMenuItem() {
-  const { setTheme } = useTheme()
-  const dark = useIsDark()
+/** Shown only when login is off. A full alert while the sidebar is open, an icon with a tooltip while it is collapsed. */
+function NoAuthAlert() {
   return (
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        tooltip={dark ? "Light mode" : "Dark mode"}
-        onClick={() => setTheme(dark ? "light" : "dark")}
-      >
-        {dark ? <SunIcon /> : <MoonIcon />}
-        <span>{dark ? "Light mode" : "Dark mode"}</span>
-      </SidebarMenuButton>
-    </SidebarMenuItem>
+    <>
+      <Alert variant="destructive" className="group-data-[collapsible=icon]:hidden">
+        <ShieldAlertIcon />
+        <AlertTitle>No authentication</AlertTitle>
+        <AlertDescription className="text-xs">
+          Anyone who can reach this page can change your proxy. Restrict access at the network layer.
+        </AlertDescription>
+      </Alert>
+      <Tooltip>
+        <TooltipTrigger
+          render={<div className="hidden items-center justify-center text-destructive group-data-[collapsible=icon]:flex" />}
+        >
+          <ShieldAlertIcon className="size-4" aria-label="No authentication" />
+        </TooltipTrigger>
+        <TooltipContent side="right">
+          No authentication. Anyone who can reach this page can change your proxy.
+        </TooltipContent>
+      </Tooltip>
+      <Separator />
+    </>
   )
 }
 
 function Editor({ user, onLogout }: { user: string | null; onLogout: () => void }) {
-  const [view, setView] = useState<View>(initialView)
+  const { page: view, params, navigate, openPanel, replaceParams, closePanel, linkProps } = useRouter()
   const [topBarSlot, setTopBarSlot] = useState<HTMLElement | null>(null)
   const [titleSlot, setTitleSlot] = useState<HTMLElement | null>(null)
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const caddyfile = useCaddyfile()
   const status = useStatus()
 
-  useEffect(() => onShowInEditor(() => setView("editor")), [])
+  useEffect(() => onShowInEditor(() => navigate("editor")), [navigate])
 
   useEffect(() => {
-    window.history.replaceState(null, "", `#${view}`)
+    document.title = pageTitle(view)
   }, [view])
 
   const current = NAV.find((item) => item.id === view)!
@@ -165,9 +155,19 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
       <Sidebar collapsible="icon" variant="inset">
         <SidebarHeader>
           <div className="flex items-center gap-2 p-1">
-            <FairwayLogo className="size-8 shrink-0 text-primary" />
+            <div className="relative shrink-0">
+              <FairwayLogo className="size-8 text-primary" />
+              {/* The name is hidden while the sidebar is collapsed, so the dot moves onto the logo then. */}
+              <StatusDot
+                status={status}
+                className="absolute top-0 -right-0.5 hidden size-2.5 rounded-full ring-2 ring-sidebar group-data-[collapsible=icon]:flex"
+              />
+            </div>
             <div className="flex min-w-0 flex-col leading-tight group-data-[collapsible=icon]:hidden">
-              <span className="truncate font-heading font-semibold">Fairway</span>
+              <span className="flex items-center gap-1.5 font-heading font-semibold">
+                <span className="truncate">Fairway</span>
+                <StatusDot status={status} />
+              </span>
               <span className="truncate text-xs text-muted-foreground">Caddy control</span>
             </div>
           </div>
@@ -183,7 +183,7 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
                     <SidebarMenuButton
                       isActive={view === item.id}
                       tooltip={item.label}
-                      onClick={() => setView(item.id)}
+                      render={<a {...linkProps(item.id)} />}
                     >
                       <item.icon />
                       <span>{item.label}</span>
@@ -199,11 +199,10 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
         </SidebarContent>
 
         <SidebarFooter>
-          <StatusBadges status={status} />
+          {status?.auth.mode === "none" && <NoAuthAlert />}
           <SidebarMenu>
-            <ThemeMenuItem />
             <SidebarMenuItem>
-              <SidebarMenuButton tooltip="Settings" onClick={() => setSettingsOpen(true)}>
+              <SidebarMenuButton tooltip="Settings" onClick={() => openPanel({ settings: "general" })}>
                 <SettingsIcon />
                 <span>Settings</span>
               </SidebarMenuButton>
@@ -222,7 +221,8 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
           <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
           <h1 className="font-heading font-medium">{current.label}</h1>
           <div ref={setTitleSlot} className="flex shrink-0 items-center gap-2" />
-          <div ref={setTopBarSlot} className="ml-auto flex min-w-0 items-center gap-2 overflow-x-auto" />
+          {/* The padding, undone by the negative margin, leaves room for the 1px a pressed button moves and for focus rings; without it they overflow and a scrollbar appears. */}
+          <div ref={setTopBarSlot} className="-mr-1 -my-1 ml-auto flex min-w-0 items-center gap-2 overflow-x-auto p-1" />
         </header>
 
         <div hidden={view !== "editor"} className="min-h-0 flex-1">
@@ -269,7 +269,7 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
               dirty={caddyfile.dirty}
               onLoadIntoEditor={(text) => {
                 caddyfile.setText(text)
-                setView("editor")
+                navigate("editor")
               }}
               onRolledBack={caddyfile.load}
             />
@@ -288,13 +288,18 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
         </TopBarTitleSlotProvider>
         </TopBarSlotProvider>
       </SidebarInset>
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} user={user} />
+      <SettingsDialog
+        category={params.settings ?? null}
+        onCategoryChange={(settings) => replaceParams({ settings })}
+        onClose={() => closePanel(["settings"])}
+        user={user}
+      />
     </SidebarProvider>
   )
 }
 
 /** Decides between the login view and the editor. The editor remounts after a sign in, so unsaved text is dropped. */
-export default function App() {
+function Gate() {
   const [gate, setGate] = useState<Gate | "loading">("loading")
 
   const check = useCallback(async () => {
@@ -330,5 +335,13 @@ export default function App() {
     <LoginRequiredContext value={gate.user !== null}>
       <Editor user={gate.user} onLogout={() => void logout()} />
     </LoginRequiredContext>
+  )
+}
+
+export default function App() {
+  return (
+    <RouterProvider>
+      <Gate />
+    </RouterProvider>
   )
 }

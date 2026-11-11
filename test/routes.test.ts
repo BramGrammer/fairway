@@ -86,3 +86,82 @@ describe("summarizeRoutes", () => {
     assert.deepEqual(summarizeRoutes(null), []);
   });
 });
+
+describe("Rule.matchers", () => {
+  const respond = (status: number) => ({ handler: "static_response", status_code: status });
+  const rulesOf = (match: Record<string, unknown>[] | undefined, handle: unknown[]) =>
+    summarizeRoutes({ srv0: { listen: [":443"], routes: [{ match: (match ?? [{}]).map((set) => ({ host: ["m.test"], ...set })), handle }] } })[0].rules;
+  // Documentation ranges, 22 of them.
+  const ranges = Array.from({ length: 22 }, (_, i) => `198.51.${i}.0/24`);
+
+  it("uses the matcher text as the label of a path and a method, without detail", () => {
+    const [path] = rulesOf([{ path: ["/api/*"] }], [respond(200)]);
+    assert.deepEqual(path.matchers, [{ label: "path /api/*" }]);
+    const [method] = rulesOf([{ method: ["GET", "POST"] }], [respond(200)]);
+    assert.deepEqual(method.matchers, [{ label: "method GET|POST" }]);
+    assert.equal(method.match, "method GET|POST");
+  });
+
+  it("makes one chip per matcher in a set", () => {
+    const [rule] = rulesOf([{ path: ["/a"], method: ["POST"] }], [respond(200)]);
+    assert.deepEqual(rule.matchers.map((c) => c.label), ["path /a", "method POST"]);
+  });
+
+  it("keeps a short ip list as is", () => {
+    const [rule] = rulesOf([{ remote_ip: { ranges: ["192.0.2.0/24", "203.0.113.0/24"] } }], [respond(200)]);
+    assert.deepEqual(rule.matchers, [{ label: "ip 192.0.2.0/24 203.0.113.0/24" }]);
+  });
+
+  it("summarises a long ip list and puts every range in the detail, under a heading line", () => {
+    const [rule] = rulesOf([{ remote_ip: { ranges } }], [respond(200)]);
+    assert.equal(rule.matchers.length, 1);
+    assert.equal(rule.matchers[0].label, "ip · 22 ranges");
+    assert.deepEqual(rule.matchers[0].detail?.split("\n"), ["ip", ...ranges]);
+    assert.match(rule.match, /^ip 198\.51\.0\.0\/24 /);
+  });
+
+  it("reads not(...) of one matcher as a negated label (the CDN-only 404 case)", () => {
+    const [rule] = rulesOf([{ not: [{ remote_ip: { ranges } }] }], [respond(404)]);
+    assert.deepEqual(rule.matchers.map((c) => c.label), ["not ip · 22 ranges"]);
+    assert.deepEqual(rule.matchers[0].detail?.split("\n"), ["not ip", ...ranges]);
+    assert.equal(rule.destinations[0].status, 404);
+    const [short] = rulesOf([{ not: [{ path: ["/x"] }] }], [respond(404)]);
+    assert.deepEqual(short.matchers, [{ label: "not path /x" }]);
+  });
+
+  it("handles header and vars matchers, long or short", () => {
+    const [rule] = rulesOf(
+      [{ header: { "X-Forwarded-For": ["a", "b", "c", "d"], Accept: ["text/html"] }, vars: { "{http.vars.tier}": ["gold"] } }],
+      [respond(200)],
+    );
+    assert.deepEqual(rule.matchers.map((c) => c.label), ["header X-Forwarded-For · 4 values", "Accept: text/html", "http.vars.tier = gold"]);
+    assert.equal(rule.matchers[0].detail, "header X-Forwarded-For\na\nb\nc\nd");
+  });
+
+  it("truncates a single long value and keeps it whole in the detail", () => {
+    const pattern = "^(AAAAAAAAAA|BBBBBBBBBB|CCCCCCCCCC)$";
+    const [rule] = rulesOf([{ header_regexp: { "Cf-Ipcountry": { pattern } } }], [respond(200)]);
+    assert.ok(rule.matchers[0].label.length <= 32);
+    assert.equal(rule.matchers[0].detail, `Cf-Ipcountry ~ ${pattern}`);
+  });
+
+  it("joins several sets of one level with 'or' in a single chip", () => {
+    const [rule] = rulesOf([{ path: ["/a"] }, { path: ["/b"] }], [respond(200)]);
+    assert.deepEqual(rule.matchers, [{ label: "path /a or path /b" }]);
+    const [long] = rulesOf([{ path: ["/aaaaaaaaaaaaaaaa"] }, { path: ["/bbbbbbbbbbbbbbbb"] }], [respond(200)]);
+    assert.deepEqual(long.matchers, [{ label: "2 alternatives", detail: "path /aaaaaaaaaaaaaaaa\nor path /bbbbbbbbbbbbbbbb" }]);
+  });
+
+  it("continues the chip list through nested subroutes", () => {
+    const nested = { handler: "subroute", routes: [{ match: [{ method: ["POST"] }], handle: [respond(201)] }] };
+    const rules = rulesOf([{ path: ["/api/*"] }], [nested]);
+    assert.equal(rules[0].match, "path /api/* → method POST");
+    assert.deepEqual(rules[0].matchers.map((c) => c.label), ["path /api/*", "method POST"]);
+  });
+
+  it("gives a rule without matcher an empty list", () => {
+    const rules = rulesOf(undefined, [respond(200)]);
+    assert.equal(rules[0].match, "");
+    assert.deepEqual(rules[0].matchers, []);
+  });
+});

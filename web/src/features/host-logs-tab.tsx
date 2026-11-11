@@ -1,4 +1,4 @@
-import { Fragment, useContext, useEffect, useRef, useState } from "react"
+import { Fragment, useCallback, useContext, useEffect, useRef, useState } from "react"
 import { ArrowUpIcon, ChevronRightIcon, InfoIcon, PauseIcon, PlayIcon, ScrollTextIcon } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -11,10 +11,11 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
-import { Input } from "@/components/ui/input"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { SearchField } from "@/components/search-field"
 import { Spinner } from "@/components/ui/spinner"
+import { ToolbarDivider, ToolbarToggle } from "@/components/toolbar-action"
 import {
-  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -125,7 +126,7 @@ function useHostLog(host: string) {
 
 function PrivacyNote() {
   return (
-    <Alert>
+    <Alert className="shrink-0 rounded-none border-x-0 border-t-0">
       <InfoIcon />
       <AlertTitle>Logs can contain visitor details</AlertTitle>
       <AlertDescription>
@@ -145,80 +146,81 @@ function LogTable({ rows }: { rows: Row[] }) {
       return next
     })
   return (
-    <div className="overflow-hidden rounded-lg border">
-      <Table className="font-mono text-xs [&_td]:px-1.5 [&_th]:px-1.5">
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-6" />
-            <TableHead>Time</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Method</TableHead>
-            <TableHead>Path</TableHead>
-            <TableHead>Client</TableHead>
-            <TableHead className="text-right">Duration</TableHead>
-            <TableHead className="text-right">Size</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map(({ id, line }) => {
-            const row = formatLogRow(line)
-            const expanded = open.has(id)
-            return (
-              <Fragment key={id}>
-                <TableRow
-                  className={cn("cursor-pointer", row.tone === "server-error" && "bg-destructive/5")}
-                  onClick={() => toggle(id)}
-                >
-                  <TableCell className="w-6 pr-0">
-                    <button
-                      type="button"
-                      aria-label={expanded ? "Hide details" : "Show details"}
-                      aria-expanded={expanded}
-                      className="flex text-muted-foreground"
-                    >
-                      <ChevronRightIcon className={cn("size-3.5 transition-transform", expanded && "rotate-90")} />
-                    </button>
+    <table
+      data-slot="table"
+      className="w-full caption-bottom font-mono text-xs [&_td]:px-1.5 [&_th]:px-1.5 [&_td:first-child]:pl-4 [&_th:first-child]:pl-4 [&_td:last-child]:pr-4 [&_th:last-child]:pr-4"
+    >
+      <TableHeader className="sticky top-0 z-10 bg-background">
+        <TableRow>
+          <TableHead className="w-6" />
+          <TableHead>Time</TableHead>
+          <TableHead>Status</TableHead>
+          <TableHead>Method</TableHead>
+          <TableHead>Path</TableHead>
+          <TableHead>Client</TableHead>
+          <TableHead className="text-right">Duration</TableHead>
+          <TableHead className="text-right">Size</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map(({ id, line }) => {
+          const row = formatLogRow(line)
+          const expanded = open.has(id)
+          return (
+            <Fragment key={id}>
+              <TableRow
+                className={cn("cursor-pointer", row.tone === "server-error" && "bg-destructive/5")}
+                onClick={() => toggle(id)}
+              >
+                <TableCell className="w-6 pr-0">
+                  <button
+                    type="button"
+                    aria-label={expanded ? "Hide details" : "Show details"}
+                    aria-expanded={expanded}
+                    className="flex text-muted-foreground"
+                  >
+                    <ChevronRightIcon className={cn("size-3.5 transition-transform", expanded && "rotate-90")} />
+                  </button>
+                </TableCell>
+                <TableCell className="text-muted-foreground">{row.time}</TableCell>
+                <TableCell>
+                  <Badge variant={BADGE_VARIANT[row.tone]} className="-ml-2 font-mono">
+                    {row.status}
+                  </Badge>
+                </TableCell>
+                <TableCell>{row.method}</TableCell>
+                <TableCell className="max-w-28 truncate" title={row.path}>
+                  {row.path}
+                </TableCell>
+                <TableCell>{row.client}</TableCell>
+                <TableCell className="text-right">{row.duration}</TableCell>
+                <TableCell className="text-right">{row.size}</TableCell>
+              </TableRow>
+              {expanded && (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={8} className="bg-muted/30">
+                    <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 whitespace-normal break-all">
+                      {expandedDetails(line).map(({ label, value }) => (
+                        <Fragment key={label}>
+                          <dt className="text-muted-foreground">{label}</dt>
+                          <dd>{value}</dd>
+                        </Fragment>
+                      ))}
+                    </dl>
                   </TableCell>
-                  <TableCell className="text-muted-foreground">{row.time}</TableCell>
-                  <TableCell>
-                    <Badge variant={BADGE_VARIANT[row.tone]} className="-ml-2 font-mono">
-                      {row.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{row.method}</TableCell>
-                  <TableCell className="max-w-28 truncate" title={row.path}>
-                    {row.path}
-                  </TableCell>
-                  <TableCell>{row.client}</TableCell>
-                  <TableCell className="text-right">{row.duration}</TableCell>
-                  <TableCell className="text-right">{row.size}</TableCell>
                 </TableRow>
-                {expanded && (
-                  <TableRow className="hover:bg-transparent">
-                    <TableCell colSpan={8} className="bg-muted/30">
-                      <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1 whitespace-normal break-all">
-                        {expandedDetails(line).map(({ label, value }) => (
-                          <Fragment key={label}>
-                            <dt className="text-muted-foreground">{label}</dt>
-                            <dd>{value}</dd>
-                          </Fragment>
-                        ))}
-                      </dl>
-                    </TableCell>
-                  </TableRow>
-                )}
-              </Fragment>
-            )
-          })}
-        </TableBody>
-      </Table>
-    </div>
+              )}
+            </Fragment>
+          )
+        })}
+      </TableBody>
+    </table>
   )
 }
 
 function Message({ title, text }: { title: string; text: string }) {
   return (
-    <Empty className="border">
+    <Empty className="h-full">
       <EmptyHeader>
         <EmptyMedia variant="icon">
           <ScrollTextIcon />
@@ -236,7 +238,12 @@ export function HostLogsTab({ host }: { host: string }) {
   const [classes, setClasses] = useState<StatusClass[]>([])
   const [query, setQuery] = useState("")
   const loginRequired = useContext(LoginRequiredContext)
-  const rootRef = useRef<HTMLDivElement>(null)
+  // The table's scroll viewport, which tells when the reader has scrolled away from the newest lines.
+  const [scroller, setScroller] = useState<HTMLElement | null>(null)
+  const areaRef = useCallback(
+    (area: HTMLDivElement | null) => setScroller(area?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]') ?? null),
+    [],
+  )
   const latestId = useRef(-1)
   useEffect(() => {
     latestId.current = rows.at(-1)?.id ?? -1
@@ -244,18 +251,17 @@ export function HostLogsTab({ host }: { host: string }) {
   // While the reader is scrolled away from the newest lines, new lines are held back so the list stays put.
   const [reading, setReading] = useState<{ host: string; after: number } | null>(null)
   useEffect(() => {
-    const scroller = rootRef.current?.parentElement
     if (!scroller) return
     const onScroll = () =>
       setReading((current) => (scroller.scrollTop > READING_OFFSET ? (current?.host === host ? current : { host, after: latestId.current }) : null))
     scroller.addEventListener("scroll", onScroll, { passive: true })
     return () => scroller.removeEventListener("scroll", onScroll)
-  }, [host])
+  }, [host, scroller])
   const readingAfter = reading?.host === host ? reading.after : null
   const { shown, held } = visibleRows(rows, pausedAfter ?? readingAfter)
   const unread = pausedAfter === null && readingAfter !== null ? held : 0
   const showNew = () => {
-    rootRef.current?.parentElement?.scrollTo({ top: 0 })
+    scroller?.scrollTo({ top: 0 })
     setReading(null)
   }
   const filter: LogFilter = { classes: new Set(classes), query }
@@ -264,10 +270,12 @@ export function HostLogsTab({ host }: { host: string }) {
   const filtering = classes.length > 0 || query.trim() !== ""
   const paused = pausedAfter !== null
 
+  const pauseLabel = paused ? (held > 0 ? `Resume (${held} new)` : "Resume the live view") : "Pause the live view"
+
   let content
   if (reply === null) {
     content = (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
         <Spinner /> Reading the log
       </div>
     )
@@ -277,15 +285,9 @@ export function HostLogsTab({ host }: { host: string }) {
   } else {
     content = (
       <>
-        <div className="flex items-center justify-between gap-2">
-          <p className="font-mono text-xs text-muted-foreground">{reply.file}</p>
-          <Button variant="outline" size="sm" onClick={() => setPaused(!paused)}>
-            {paused ? <PlayIcon data-icon="inline-start" /> : <PauseIcon data-icon="inline-start" />}
-            {paused ? (held > 0 ? `Resume (${held} new)` : "Resume") : "Pause"}
-          </Button>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
           <ToggleGroup
+            className="shrink-0"
             variant="outline"
             spacing={0}
             multiple
@@ -299,35 +301,47 @@ export function HostLogsTab({ host }: { host: string }) {
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
-          <Input
-            className="min-w-40 flex-1"
-            placeholder="Search path, address, user agent"
-            aria-label="Search the log"
+          <SearchField
+            className="min-w-0 flex-1"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={setQuery}
+            placeholder="Search requests"
+            label="Search the log"
           />
+          <ToolbarDivider />
+          <ToolbarToggle label={pauseLabel} pressed={paused} onPressedChange={setPaused}>
+            {paused ? <PlayIcon /> : <PauseIcon />}
+          </ToolbarToggle>
+          {paused && held > 0 && <Badge variant="secondary">{held} new</Badge>}
         </div>
-        {shown.length === 0 ? (
-          <Message title="No requests yet" text={`There are no requests for ${host} yet.`} />
-        ) : visible.length === 0 && filtering ? (
-          <Message title="No matching requests" text="No lines match the current filter." />
-        ) : (
-          <LogTable rows={visible} />
-        )}
+        <div className="relative min-h-0 flex-1">
+          {unread > 0 && (
+            <div className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center">
+              <Button size="sm" className="pointer-events-auto rounded-full shadow-md" onClick={showNew}>
+                <ArrowUpIcon data-icon="inline-start" />
+                {unread} new {unread === 1 ? "request" : "requests"}
+              </Button>
+            </div>
+          )}
+          {shown.length === 0 ? (
+            <Message title="No requests yet" text={`There are no requests for ${host} yet.`} />
+          ) : visible.length === 0 && filtering ? (
+            <Message title="No matching requests" text="No lines match the current filter." />
+          ) : (
+            <ScrollArea ref={areaRef} horizontal className="h-full">
+              <LogTable rows={visible} />
+            </ScrollArea>
+          )}
+        </div>
+        <div className="shrink-0 truncate border-t px-4 py-2 font-mono text-xs text-muted-foreground" title={reply.file}>
+          {reply.file}
+        </div>
       </>
     )
   }
 
   return (
-    <div ref={rootRef} className="flex flex-col gap-3">
-      <div className="pointer-events-none sticky top-2 z-10 -mb-3 flex h-0 justify-center">
-        {unread > 0 && (
-          <Button size="sm" className="pointer-events-auto rounded-full shadow-md" onClick={showNew}>
-            <ArrowUpIcon data-icon="inline-start" />
-            {unread} new {unread === 1 ? "request" : "requests"}
-          </Button>
-        )}
-      </div>
+    <div className="flex h-full min-h-0 flex-col">
       {!loginRequired && <PrivacyNote />}
       {content}
     </div>

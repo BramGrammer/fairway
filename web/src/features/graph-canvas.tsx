@@ -56,7 +56,12 @@ export function GraphCanvas({ width, height, fitKey, onBackgroundClick, ref, chi
     const { width: w, height: h } = size.current
     const k = clamp(Math.min((box.width - MARGIN) / w, (box.height - MARGIN) / h), 0.4, 1.2)
     setSmooth(animate)
-    setView({ k, x: w * k < box.width ? (box.width - w * k) / 2 : 0, y: 0 })
+    // Content smaller than the area sits in the middle; larger content starts at the top left.
+    setView({
+      k,
+      x: w * k < box.width ? (box.width - w * k) / 2 : 0,
+      y: h * k < box.height ? (box.height - h * k) / 2 : 0,
+    })
   }
 
   const zoomBy = (factor: number) => {

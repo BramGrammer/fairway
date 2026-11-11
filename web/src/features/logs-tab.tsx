@@ -3,13 +3,13 @@ import {
   ArrowDownToLineIcon,
   PauseIcon,
   ScrollTextIcon,
-  SearchIcon,
   Trash2Icon,
 } from "lucide-react"
 
+import { SearchField } from "@/components/search-field"
+import { ToolbarAction, ToolbarDivider, ToolbarToggle } from "@/components/toolbar-action"
 import { TopBar } from "@/components/top-bar"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import {
   Empty,
   EmptyDescription,
@@ -17,11 +17,6 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Select,
@@ -31,8 +26,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
-import { Toggle } from "@/components/ui/toggle"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { api, openStream } from "@/lib/api"
 import { PRESSED } from "@/lib/toggle-styles"
@@ -174,17 +167,14 @@ export function LogsTab({ active }: { active: boolean }) {
       {active && (
         <TopBar>
           <div className="flex items-center gap-2">
-            <InputGroup className="w-48">
-              <InputGroupAddon>
-                <SearchIcon />
-              </InputGroupAddon>
-              <InputGroupInput
-                type="search"
-                placeholder="Search logs"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-            </InputGroup>
+            <SearchField
+              className="w-48"
+              value={search}
+              onChange={setSearch}
+              placeholder="Search logs"
+              label="Search logs"
+            />
+            <ToolbarDivider />
             <Select items={LEVELS} value={level} onValueChange={(value) => value && setLevel(value)}>
               <SelectTrigger className="w-44">
                 <SelectValue />
@@ -199,6 +189,7 @@ export function LogsTab({ active }: { active: boolean }) {
                 </SelectGroup>
               </SelectContent>
             </Select>
+            <ToolbarDivider />
             <ToggleGroup
               variant="outline"
               spacing={0}
@@ -216,31 +207,32 @@ export function LogsTab({ active }: { active: boolean }) {
             </ToggleGroup>
           </div>
 
-          <Separator orientation="vertical" className="mx-1 data-vertical:h-6 data-vertical:self-auto" />
+          <ToolbarDivider />
 
           <div className="flex items-center gap-1">
-            <Toggle variant="outline" className={PRESSED} pressed={paused} onPressedChange={setPausedTo} aria-label="Pause the live stream">
+            <ToolbarToggle
+              label={paused ? "Resume the live stream" : "Pause the live stream"}
+              pressed={paused}
+              onPressedChange={setPausedTo}
+            >
               <PauseIcon />
-              Pause
-            </Toggle>
-            <Toggle variant="outline" className={PRESSED} pressed={follow} onPressedChange={setFollow} aria-label="Follow new entries">
+            </ToolbarToggle>
+            <ToolbarToggle label="Follow new entries" pressed={follow} onPressedChange={setFollow}>
               <ArrowDownToLineIcon />
-              Follow
-            </Toggle>
+            </ToolbarToggle>
           </div>
 
-          <Separator orientation="vertical" className="mx-1 data-vertical:h-6 data-vertical:self-auto" />
+          <ToolbarDivider />
 
-          <Button
-            variant="ghost"
+          <ToolbarAction
+            label="Clear the list"
             onClick={() => {
               setEntries([])
               pending.current = []
             }}
           >
-            <Trash2Icon data-icon="inline-start" />
-            Clear
-          </Button>
+            <Trash2Icon />
+          </ToolbarAction>
         </TopBar>
       )}
 
