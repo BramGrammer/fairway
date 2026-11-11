@@ -1,12 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import {
-  ArrowRightIcon,
   CircleAlertIcon,
-  CircleQuestionMarkIcon,
-  CornerDownRightIcon,
-  ExternalLinkIcon,
-  FolderIcon,
-  MessageSquareIcon,
   RefreshCwIcon,
   RouteIcon,
   SearchIcon,
@@ -16,7 +10,7 @@ import {
 import { TopBar } from "@/components/top-bar"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
-import { Button, buttonVariants } from "@/components/ui/button"
+import { Button } from "@/components/ui/button"
 import {
   Empty,
   EmptyDescription,
@@ -42,18 +36,16 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   api,
-  type Chip,
   type Destination,
   type RoutesReply,
   type Site,
 } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { PRESSED } from "@/lib/toggle-styles"
-import { HostAlertBell } from "@/features/host-alerts"
-import { TimelineStrip } from "@/features/timeline-strip"
+import { RoutesTable } from "@/features/routes-table"
+import { DEST_ICONS, hostLabel } from "@/features/routes-shared"
 import { RoutesGraph } from "@/features/routes-graph"
 import { normalizeQuery, siteMatches } from "@/features/routes-filter"
 
@@ -63,37 +55,6 @@ type Grouping = "graph" | "site" | "upstream"
 interface RoutesTabProps {
   /** The editor's current text, shown when the source is "Editor". */
   editorText: string
-}
-
-const DEST_ICONS = {
-  proxy: ArrowRightIcon,
-  file: FolderIcon,
-  redirect: CornerDownRightIcon,
-  respond: MessageSquareIcon,
-  other: CircleQuestionMarkIcon,
-} as const
-
-const isDomain = (host: string) => /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(host)
-
-function ChipBadge({ chip }: { chip: Chip }) {
-  if (!chip.detail) return <Badge variant="outline">{chip.label}</Badge>
-  return (
-    <Tooltip>
-      <TooltipTrigger render={<Badge variant="outline" />}>{chip.label}</TooltipTrigger>
-      <TooltipContent>{chip.detail}</TooltipContent>
-    </Tooltip>
-  )
-}
-
-function Chips({ chips }: { chips: Chip[] }) {
-  if (chips.length === 0) return null
-  return (
-    <div className="flex flex-wrap gap-1">
-      {chips.map((chip) => (
-        <ChipBadge key={`${chip.label}|${chip.detail ?? ""}`} chip={chip} />
-      ))}
-    </div>
-  )
 }
 
 function DestinationView({ dest }: { dest: Destination }) {
@@ -114,93 +75,7 @@ function DestinationView({ dest }: { dest: Destination }) {
   )
 }
 
-function HostLink({ host }: { host: string }) {
-  if (!isDomain(host)) return null
-  return (
-    <a
-      href={`https://${host}`}
-      target="_blank"
-      rel="noreferrer"
-      aria-label={`Open ${host}`}
-      className={buttonVariants({ variant: "ghost", size: "icon-xs" })}
-    >
-      <ExternalLinkIcon />
-    </a>
-  )
-}
-
-const hostLabel = (host: string) => (host === "*" ? "any host" : host)
 const matchLabel = (match: string) => match || "all requests"
-
-function SiteTable({ sites }: { sites: Site[] }) {
-  // Most middleware is site-wide, so only show this column when some rule has its own.
-  const showApplied = sites.some((site) => site.rules.some((rule) => rule.middleware.length > 0))
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead className="pl-4">Site</TableHead>
-          <TableHead>Path</TableHead>
-          <TableHead>Destination</TableHead>
-          <TableHead>Last 24 h</TableHead>
-          {showApplied && <TableHead className="pr-4">Also applied here</TableHead>}
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {sites.map((site) => {
-          const rules = site.rules.length > 0 ? site.rules : [null]
-          return rules.map((rule, index) => (
-            <TableRow key={`${site.hosts.join(",")}-${site.listen.join(",")}-${index}`}>
-              {index === 0 && (
-                <TableCell rowSpan={rules.length} className="min-w-64 pl-4 align-top whitespace-normal">
-                  <div className="flex flex-col gap-1.5 py-1">
-                    {site.hosts.map((host) => (
-                      <div key={host} className="flex items-center gap-1">
-                        <span className="font-medium">{hostLabel(host)}</span>
-                        <HostLink host={host} />
-                      </div>
-                    ))}
-                    <span className="font-mono text-xs text-muted-foreground">{site.listen.join(" ")}</span>
-                    <Chips chips={site.middleware} />
-                  </div>
-                </TableCell>
-              )}
-              <TableCell className={cn("font-mono text-xs whitespace-normal", !rule?.match && "text-muted-foreground")}>
-                {rule ? matchLabel(rule.match) : "—"}
-              </TableCell>
-              <TableCell className="whitespace-normal">
-                {rule ? (
-                  <div className="flex flex-col gap-1">
-                    {rule.destinations.map((dest, i) => (
-                      <DestinationView key={i} dest={dest} />
-                    ))}
-                  </div>
-                ) : (
-                  <span className="text-muted-foreground">No destination</span>
-                )}
-              </TableCell>
-              {index === 0 && (
-                <TableCell rowSpan={rules.length} className="align-top">
-                  <div className="flex flex-col gap-1.5 py-2">
-                    {site.hosts.map((host) => (
-                      <div key={host} className="flex h-5 items-center gap-2">
-                        {host === "*" ? <span className="size-4" /> : <HostAlertBell host={host} />}
-                        <TimelineStrip host={host} compact />
-                      </div>
-                    ))}
-                  </div>
-                </TableCell>
-              )}
-              {showApplied && (
-                <TableCell className="pr-4 whitespace-normal">{rule && <Chips chips={rule.middleware} />}</TableCell>
-              )}
-            </TableRow>
-          ))
-        })}
-      </TableBody>
-    </Table>
-  )
-}
 
 interface Group {
   key: string
@@ -308,6 +183,12 @@ export function RoutesTab({ editorText }: RoutesTabProps) {
     [sites]
   )
 
+  const summary = `${sites.length} ${sites.length === 1 ? "site" : "sites"} · ${routeCount} ${
+    routeCount === 1 ? "route" : "routes"
+  } · ${upstreamCount} ${upstreamCount === 1 ? "upstream" : "upstreams"} · ${
+    source === "running" ? "running config" : "unsaved editor text"
+  }`
+
   return (
     <div className="flex h-full flex-col">
       <TopBar>
@@ -384,13 +265,8 @@ export function RoutesTab({ editorText }: RoutesTabProps) {
         </Alert>
       )}
 
-      {result && !result.error && (
-        <div className="shrink-0 border-b px-4 py-2 text-xs text-muted-foreground">
-          {sites.length} {sites.length === 1 ? "site" : "sites"} · {routeCount}{" "}
-          {routeCount === 1 ? "route" : "routes"} · {upstreamCount}{" "}
-          {upstreamCount === 1 ? "upstream" : "upstreams"} ·{" "}
-          {source === "running" ? "running config" : "unsaved editor text"}
-        </div>
+      {result && !result.error && grouping !== "site" && (
+        <div className="flex h-10 shrink-0 items-center border-b px-4 text-xs text-muted-foreground">{summary}</div>
       )}
 
       <div className="min-h-0 flex-1">
@@ -418,7 +294,11 @@ export function RoutesTab({ editorText }: RoutesTabProps) {
               <RoutesGraph sites={sites} query={query} />
             ) : (
               <ScrollArea className="h-full">
-                {grouping === "site" ? <SiteTable sites={sites} /> : <UpstreamTable sites={sites} />}
+                {grouping === "site" ? (
+                  <RoutesTable sites={sites} editorText={editorText} summary={summary} />
+                ) : (
+                  <UpstreamTable sites={sites} />
+                )}
               </ScrollArea>
             )}
           </div>

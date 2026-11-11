@@ -19,9 +19,22 @@ const palette = {
   },
 }
 
+/** The syntax colours of the editor, shared with read-only code blocks. */
+export function caddyfileHighlightStyle(dark: boolean) {
+  const colors = dark ? palette.dark : palette.light
+  return HighlightStyle.define([
+    { tag: tags.keyword, color: colors.keyword },
+    { tag: tags.string, color: colors.string },
+    { tag: tags.variableName, color: colors.variable },
+    { tag: tags.atom, color: colors.atom },
+    { tag: tags.typeName, color: colors.type },
+    { tag: tags.comment, color: "var(--muted-foreground)", fontStyle: "italic" },
+    { tag: tags.bracket, color: "var(--muted-foreground)" },
+  ])
+}
+
 /** Editor chrome follows the shadcn CSS variables; syntax colours switch with the theme. */
 export function editorTheme(dark: boolean) {
-  const colors = dark ? palette.dark : palette.light
   const warning = dark ? "#fbbf24" : "#b45309"
   const underline = (color: string) =>
     `url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="6" height="3"><path d="M0 2.5 L1.5 0.5 L3 2.5 L4.5 0.5 L6 2.5" fill="none" stroke="${encodeURIComponent(color)}" stroke-width="1"/></svg>')`
@@ -117,16 +130,6 @@ export function editorTheme(dark: boolean) {
       },
       { dark }
     ),
-    syntaxHighlighting(
-      HighlightStyle.define([
-        { tag: tags.keyword, color: colors.keyword },
-        { tag: tags.string, color: colors.string },
-        { tag: tags.variableName, color: colors.variable },
-        { tag: tags.atom, color: colors.atom },
-        { tag: tags.typeName, color: colors.type },
-        { tag: tags.comment, color: "var(--muted-foreground)", fontStyle: "italic" },
-        { tag: tags.bracket, color: "var(--muted-foreground)" },
-      ])
-    ),
+    syntaxHighlighting(caddyfileHighlightStyle(dark)),
   ]
 }

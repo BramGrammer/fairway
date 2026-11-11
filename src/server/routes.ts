@@ -20,6 +20,8 @@ export interface Rule {
   destinations: Destination[];
   /** Middleware that applies to this rule on top of the site-wide chips. */
   middleware: Chip[];
+  /** The rule's own match as short chips (one per matcher); long ones carry the full text as detail. */
+  matchers: Chip[];
 }
 
 export interface Site {
@@ -43,8 +45,8 @@ interface Server {
 }
 
 type Item =
-  | { ctx: string[]; kind: "middleware"; chip: Chip }
-  | { ctx: string[]; kind: "terminal"; dest: Destination };
+  | { ctx: string[]; chips: Chip[]; kind: "middleware"; chip: Chip }
+  | { ctx: string[]; chips: Chip[]; kind: "terminal"; dest: Destination };
 
 const stringList = (value: unknown): string[] =>
   Array.isArray(value) ? value.map(String) : value == null ? [] : [String(value)];
@@ -91,6 +93,94 @@ function describeSet(set: Matcher): string {
 
 function describeSets(sets: Matcher[] | undefined): string {
   return (sets ?? []).map(describeSet).filter(Boolean).join(" or ");
+}
+
+/** One readable piece of a matcher: its text, plus the values behind it when it is a list. */
+interface Part {
+  text: string;
+  /** What the part is, used in the short label of a long one, e.g. `ip` or `header X-Forwarded-For`. */
+  noun: string;
+  /** Singular unit of the values, e.g. `range`. */
+  unit: string;
+  values: string[];
+  negated?: boolean;
+}
+
+const plural = (count: number, unit: string) => `${count} ${unit}${count === 1 ? "" : "s"}`;
+
+function listPart(noun: string, unit: string, values: string[], text: string): Part {
+  return { text, noun, unit, values };
+}
+
+function matcherParts(key: string, value: unknown): Part[] {
+  const v = value as Json;
+  switch (key) {
+    case "path": {
+      const values = stringList(value);
+      return [listPart("path", "path", values, `path ${values.join(" ")}`)];
+    }
+    case "method": {
+      const values = stringList(value);
+      return [listPart("method", "method", values, `method ${values.join("|")}`)];
+    }
+    case "remote_ip": {
+      const values = stringList(v.ranges);
+      return [listPart("ip", "range", values, `ip ${values.join(" ")}`)];
+    }
+    case "header":
+      return Object.entries(v).map(([name, values]) => {
+        const list = stringList(values);
+        return listPart(`header ${name}`, "value", list, `${name}: ${list.join("|")}`);
+      });
+    case "vars":
+      return Object.entries(v).map(([name, values]) => {
+        const list = stringList(values);
+        const clean = name.replace(/[{}]/g, "");
+        return listPart(`var ${clean}`, "value", list, `${clean} = ${list.join("|")}`);
+      });
+    case "header_regexp":
+      return Object.entries(v).map(([name, matcher]) => {
+        const text = `${name} ~ ${String((matcher as Json).pattern ?? "")}`;
+        return listPart(`header ${name}`, "pattern", [text], text);
+      });
+    case "not": {
+      const sets = value as Matcher[];
+      const inner = sets.length === 1 ? Object.entries(sets[0]).flatMap(([k, val]) => matcherParts(k, val)) : [];
+      if (inner.length === 1) return [{ ...inner[0], negated: !inner[0].negated, text: inner[0].negated ? inner[0].text.replace(/^not /, "") : `not ${inner[0].text}` }];
+      const text = describeMatcher(key, value);
+      return [listPart("not", "condition", [text], text)];
+    }
+    default: {
+      const text = describeMatcher(key, value);
+      return [listPart(key, "value", [text], text)];
+    }
+  }
+}
+
+const LONG_TEXT = 32;
+const LONG_VALUES = 3;
+
+/** Short parts keep their text; long ones get a summary label and the whole text as detail. */
+function partChip(part: Part): Chip {
+  const { text, values, negated } = part;
+  const multi = values.length > 1;
+  if (!(values.length > LONG_VALUES || text.length > LONG_TEXT)) return { label: text };
+  const prefix = negated ? "not " : "";
+  if (!multi) return { label: `${text.slice(0, LONG_TEXT - 3)}...`, detail: text };
+  // Detail: a heading line (the noun, with "not " when negated) and then one value per line.
+  return { label: `${prefix}${part.noun} · ${plural(values.length, part.unit)}`, detail: [`${prefix}${part.noun}`, ...values].join("\n") };
+}
+
+/** The chips for one nesting level: one per matcher in a set, or a single "a or b" chip for several sets. */
+function describeChips(sets: Matcher[] | undefined): Chip[] {
+  const filled = (sets ?? []).filter((set) => Object.keys(set).length > 0);
+  if (filled.length === 0) return [];
+  if (filled.length === 1) return Object.entries(filled[0]).flatMap(([k, v]) => matcherParts(k, v).map(partChip));
+  const lines = filled.map(describeSet).filter(Boolean);
+  const label = lines.join(" or ");
+  return label.length > LONG_TEXT
+    ? [{ label: `${plural(lines.length, "alternative")}`, detail: lines.join("\nor ") }]
+    : [{ label }];
 }
 
 /** Pulls the host names out of a route's matchers and returns what is left. */
@@ -164,37 +254,39 @@ const HIDDEN = new Set(["vars", "geo_ip", "geoip"]);
  * `root` comes from a `vars` handler that can sit in an earlier route than the file_server it
  * configures (a matcher in between splits the chain), so it carries across sibling routes.
  */
-function walk(routes: Route[], ctx: string[], items: Item[], inheritedRoot?: string): void {
+function walk(routes: Route[], ctx: string[], chips: Chip[], items: Item[], inheritedRoot?: string): void {
   let sharedRoot = inheritedRoot;
   for (const route of routes) {
     const handlers = route.handle ?? [];
     const guard = handlers.length > 0 && handlers.every(isBlock) ? pureNot(route.match) : null;
     const local = guard ? null : describeSets(route.match);
     const here = local ? [...ctx, local] : ctx;
+    const hereChips = local ? [...chips, ...describeChips(route.match)] : chips;
     let root = sharedRoot;
 
     for (const handler of handlers) {
       const name = String(handler.handler);
       if (name === "subroute") {
-        walk((handler.routes as Route[] | undefined) ?? [], here, items, root);
+        walk((handler.routes as Route[] | undefined) ?? [], here, hereChips, items, root);
       } else if (name === "reverse_proxy") {
         const tls = Boolean((handler.transport as Json | undefined)?.tls);
         const upstreams = ((handler.upstreams as Json[] | undefined) ?? []).map(
           (upstream) => `${tls ? "https://" : ""}${String(upstream.dial ?? upstream.lookup_srv ?? "?")}`,
         );
-        items.push({ ctx: here, kind: "terminal", dest: { kind: "proxy", summary: `proxy to ${upstreams.join(", ")}`, upstreams } });
+        items.push({ ctx: here, chips: hereChips, kind: "terminal", dest: { kind: "proxy", summary: `proxy to ${upstreams.join(", ")}`, upstreams } });
       } else if (name === "file_server") {
         const dir = root ?? String(handler.root ?? ".");
         const browse = handler.browse ? " (browsable)" : "";
-        items.push({ ctx: here, kind: "terminal", dest: { kind: "file", summary: `files from ${dir}${browse}` } });
+        items.push({ ctx: here, chips: hereChips, kind: "terminal", dest: { kind: "file", summary: `files from ${dir}${browse}` } });
       } else if (name === "static_response") {
         const status = handler.status_code === undefined ? undefined : Number(handler.status_code);
         const location = stringList((handler.headers as Json | undefined)?.Location)[0];
         if (guard && isBlock(handler)) {
-          items.push({ ctx: here, kind: "middleware", chip: restrictionChip(guard) });
+          items.push({ ctx: here, chips: hereChips, kind: "middleware", chip: restrictionChip(guard) });
         } else if (location) {
           items.push({
             ctx: here,
+            chips: hereChips,
             kind: "terminal",
             dest: { kind: "redirect", summary: `redirect ${status ?? 302} to ${location}`, status: status ?? 302, target: location },
           });
@@ -202,6 +294,7 @@ function walk(routes: Route[], ctx: string[], items: Item[], inheritedRoot?: str
           const body = typeof handler.body === "string" && handler.body ? ` "${handler.body.slice(0, 40)}"` : "";
           items.push({
             ctx: here,
+            chips: hereChips,
             kind: "terminal",
             dest: { kind: "respond", summary: handler.close ? "close connection" : `respond ${status ?? 200}${body}`, status },
           });
@@ -211,7 +304,7 @@ function walk(routes: Route[], ctx: string[], items: Item[], inheritedRoot?: str
         if (!local) sharedRoot = root;
       } else if (!HIDDEN.has(name)) {
         const chip = KNOWN_MIDDLEWARE[name]?.(handler) ?? { label: name };
-        items.push({ ctx: here, kind: "middleware", chip });
+        items.push({ ctx: here, chips: hereChips, kind: "middleware", chip });
       }
     }
   }
@@ -231,7 +324,7 @@ function unique(chips: Chip[]): Chip[] {
 function summarizeRoute(route: Route, listen: string[]): Site {
   const { hosts, rest } = extractHosts(route.match);
   const items: Item[] = [];
-  walk([{ match: rest, handle: route.handle }], [], items);
+  walk([{ match: rest, handle: route.handle }], [], [], items);
 
   const middleware = items.filter((item) => item.kind === "middleware");
   const siteWide = unique(middleware.filter((item) => item.ctx.length === 0).map((item) => item.chip));
@@ -243,7 +336,7 @@ function summarizeRoute(route: Route, listen: string[]): Site {
     let rule = rules.get(key);
     if (!rule) {
       const scoped = middleware.filter((m) => m.ctx.length > 0 && isPrefix(m.ctx, item.ctx)).map((m) => m.chip);
-      rule = { match: key, destinations: [], middleware: unique(scoped) };
+      rule = { match: key, destinations: [], middleware: unique(scoped), matchers: item.chips };
       rules.set(key, rule);
     }
     rule.destinations.push(item.dest);

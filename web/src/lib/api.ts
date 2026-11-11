@@ -93,6 +93,8 @@ export interface Destination {
 
 export interface Rule {
   match: string
+  /** The same condition as `match`, in parts: a short label for a table cell and the full text as detail. */
+  matchers?: Chip[]
   destinations: Destination[]
   middleware: Chip[]
 }
