@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { toast } from "sonner"
 import {
   CircleAlertIcon,
@@ -21,8 +21,9 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Kbd, KbdGroup } from "@/components/ui/kbd"
-import { TopBar } from "@/components/top-bar"
+import { TopBar, TopBarTitle } from "@/components/top-bar"
 import { Spinner } from "@/components/ui/spinner"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   api,
   describeFailure,
@@ -62,6 +63,44 @@ interface Notice {
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform)
 const modKey = isMac ? "⌘" : "Ctrl"
 const altKey = isMac ? "⌥" : "Alt"
+
+/** An icon-only button of the top bar; its name, and its shortcut if it has one, show in a tooltip. */
+function ToolbarAction({
+  label,
+  keys,
+  variant = "outline",
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string
+  keys?: string[]
+  variant?: "outline" | "ghost"
+  disabled?: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <Tooltip>
+      {/* The span keeps the tooltip working while the button is disabled. */}
+      <TooltipTrigger render={<span className="inline-flex" />}>
+        <Button variant={variant} size="icon" aria-label={label} onClick={onClick} disabled={disabled}>
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>
+        {label}
+        {keys && (
+          <KbdGroup>
+            {keys.map((key) => (
+              <Kbd key={key}>{key}</Kbd>
+            ))}
+          </KbdGroup>
+        )}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
 
 export function EditorTab({
   active,
@@ -197,40 +236,43 @@ export function EditorTab({
   return (
     <div className="flex h-full flex-col">
       {active && (
-        <TopBar>
-          {dirty && <Badge variant="secondary">Unsaved changes</Badge>}
-          <Button
-            variant="ghost"
-            onClick={() => {
-              onTextChange(baseText)
-              showNotice(null)
-            }}
-            disabled={!dirty}
-          >
-            <Undo2Icon data-icon="inline-start" />
-            Discard changes
-          </Button>
-          <Button variant="outline" onClick={() => void format()} disabled={formatting}>
-            {formatting ? (
-              <Spinner data-icon="inline-start" />
-            ) : (
-              <WandSparklesIcon data-icon="inline-start" />
-            )}
-            Format
-          </Button>
-          <Button variant="outline" onClick={validate} disabled={validating}>
-            {validating ? (
-              <Spinner data-icon="inline-start" />
-            ) : (
-              <CircleCheckIcon data-icon="inline-start" />
-            )}
-            Validate
-          </Button>
-          <Button onClick={review} disabled={!dirty || validating}>
-            <RocketIcon data-icon="inline-start" />
-            Review &amp; deploy
-          </Button>
-        </TopBar>
+        <>
+          <TopBarTitle>{dirty && <Badge variant="secondary">Unsaved changes</Badge>}</TopBarTitle>
+          <TopBar>
+            <ToolbarAction
+              label="Discard changes"
+              onClick={() => {
+                onTextChange(baseText)
+                showNotice(null)
+              }}
+              disabled={!dirty}
+              variant="ghost"
+            >
+              <Undo2Icon />
+            </ToolbarAction>
+            <ToolbarAction label="Format" keys={["⇧", altKey, "F"]} onClick={() => void format()} disabled={formatting}>
+              {formatting ? <Spinner /> : <WandSparklesIcon />}
+            </ToolbarAction>
+            <ToolbarAction label="Validate" onClick={validate} disabled={validating}>
+              {validating ? <Spinner /> : <CircleCheckIcon />}
+            </ToolbarAction>
+            <Tooltip>
+              <TooltipTrigger render={<span className="inline-flex" />}>
+                <Button onClick={review} disabled={!dirty || validating}>
+                  <RocketIcon data-icon="inline-start" />
+                  Deploy
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                Review the changes, then deploy
+                <KbdGroup>
+                  <Kbd>{modKey}</Kbd>
+                  <Kbd>S</Kbd>
+                </KbdGroup>
+              </TooltipContent>
+            </Tooltip>
+          </TopBar>
+        </>
       )}
 
       {summary && (
