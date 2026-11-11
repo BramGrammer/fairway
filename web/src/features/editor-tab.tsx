@@ -21,6 +21,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Kbd, KbdGroup } from "@/components/ui/kbd"
+import { ShortcutsPopover } from "@/components/shortcuts-popover"
+import { altKey, modKey, shiftKey } from "@/lib/keys"
 import { TopBar, TopBarTitle } from "@/components/top-bar"
 import { Spinner } from "@/components/ui/spinner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -60,9 +62,6 @@ interface Notice {
   body?: string
 }
 
-const isMac = /Mac|iPhone|iPad/.test(navigator.platform)
-const modKey = isMac ? "⌘" : "Ctrl"
-const altKey = isMac ? "⌥" : "Alt"
 
 /** An icon-only button of the top bar; its name, and its shortcut if it has one, show in a tooltip. */
 function ToolbarAction({
@@ -250,7 +249,7 @@ export function EditorTab({
             >
               <Undo2Icon />
             </ToolbarAction>
-            <ToolbarAction label="Format" keys={["⇧", altKey, "F"]} onClick={() => void format()} disabled={formatting}>
+            <ToolbarAction label="Format" keys={[shiftKey, altKey, "F"]} onClick={() => void format()} disabled={formatting}>
               {formatting ? <Spinner /> : <WandSparklesIcon />}
             </ToolbarAction>
             <ToolbarAction label="Validate" onClick={validate} disabled={validating}>
@@ -336,29 +335,7 @@ export function EditorTab({
         <span>
           Ln {cursor.line}, Col {cursor.column} · Tabs
         </span>
-        <span className="flex items-center gap-3">
-          <span className="flex items-center gap-1.5">
-            <Kbd>Tab</Kbd> indent <Kbd>⇧ Tab</Kbd> outdent
-          </span>
-          <span className="flex items-center gap-1.5">
-            <KbdGroup>
-              <Kbd>⇧</Kbd>
-              <Kbd>{altKey}</Kbd>
-              <Kbd>F</Kbd>
-            </KbdGroup>
-            format
-          </span>
-          <span className="flex items-center gap-1.5">
-            <KbdGroup>
-              <Kbd>{modKey}</Kbd>
-              <Kbd>S</Kbd>
-            </KbdGroup>
-            review &amp; deploy
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Kbd>Esc</Kbd> then <Kbd>Tab</Kbd> leaves the editor
-          </span>
-        </span>
+        <ShortcutsPopover />
       </div>
 
       <DiffDialog
