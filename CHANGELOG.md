@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.5.0](https://github.com/BramGrammer/fairway/compare/v0.4.0...v0.5.0) (2026-11-11)
+
+
+### Features
+
+* a sortable routes table with one line per route, and the Caddyfile in a popover ([1961de9](https://github.com/BramGrammer/fairway/commit/1961de98db2c8bf96837e3e4433b74b1f4a10ffb))
+* an icon button for expand all, and dividers in the graph controls ([7449a46](https://github.com/BramGrammer/fairway/commit/7449a464a3279e14f85107af50f1ccb73bdd09d3))
+* center the routes graph vertically when it opens ([756aabd](https://github.com/BramGrammer/fairway/commit/756aabd9db36c87708eeba99d06393195a73193e))
+* dark mode switch in the user menu, and a plainer sidebar footer ([bee381a](https://github.com/BramGrammer/fairway/commit/bee381a06bf7b14750eabafe258d1a686b7f80e1))
+* find and replace bar in the editor ([07f18d2](https://github.com/BramGrammer/fairway/commit/07f18d288f3c58db78487274c1b27e812eb1d975))
+* Findings in the editor, find bar, icon toolbar and shortcuts popover ([bcdd514](https://github.com/BramGrammer/fairway/commit/bcdd514208ec2dc82c7a9f4f58af0b02446f5187))
+* icon buttons for the switches and Refresh on the Routes page ([10b3726](https://github.com/BramGrammer/fairway/commit/10b37269bbd3431af7afd28918c8343c54500c16))
+* icon buttons with tooltips and dividers in the Logs top bar ([122c07f](https://github.com/BramGrammer/fairway/commit/122c07f99ae924913de5cfa8903c7b8ac1239a6a))
+* icon buttons with tooltips in the editor toolbar ([367fdd9](https://github.com/BramGrammer/fairway/commit/367fdd960d7e411df8d4d1538c12809e6eca642a))
+* list the editor's keyboard shortcuts in a popover ([3367190](https://github.com/BramGrammer/fairway/commit/33671903856a7c82ad991c0197ee3db4052a44cd))
+* neutral sidebar colours with a high-contrast selected item ([418f670](https://github.com/BramGrammer/fairway/commit/418f6705c9a66a116ed6039ab174c3ccf841f845))
+* real addresses for the pages, with working Back and Forward ([ad4bcd0](https://github.com/BramGrammer/fairway/commit/ad4bcd008be16894c1bfcc7f3c1724c8b3255d4a))
+* remove the by-destination view of the Routes page ([7642221](https://github.com/BramGrammer/fairway/commit/7642221347d192f6ebd5bb7f051fb34996c1f72e))
+* show Caddy's errors and warnings at their line, with rules worth a look ([8235e84](https://github.com/BramGrammer/fairway/commit/8235e847cfa7792793cd132c79362350478e432b))
+* show Caddy's state as a dot after the name, and the missing login as an alert ([8ab9abf](https://github.com/BramGrammer/fairway/commit/8ab9abfbe044665f28d50dec39a2f3ce09492863))
+* show the Routes page summary as badges, and drop the graph hint ([6eac4a0](https://github.com/BramGrammer/fairway/commit/6eac4a06189e9aa4121b735e6fc695ba9196c3cc))
+* tables, icon toolbars, real page addresses and a calmer sidebar ([e59a858](https://github.com/BramGrammer/fairway/commit/e59a8586d2a63673fc7a154e1faced1a0c8e743f))
+* the Events page is a sortable table ([e1426c7](https://github.com/BramGrammer/fairway/commit/e1426c7ad78f713afad5e5a30178c3a68918a5ff))
+* the Logs tab of the route drawer is a full-width bar and table ([8a8706f](https://github.com/BramGrammer/fairway/commit/8a8706feebb681cb70732e81dbc160cc50ac45fa))
+* themed scrollbars in the detail drawer, the history diff and the review dialog ([923339e](https://github.com/BramGrammer/fairway/commit/923339ef5bd9769d86a407de0ed3e0a14783fa3f))
+
+
+### Bug Fixes
+
+* keep the Routes table's top bar in place while the rows scroll ([ecee8fa](https://github.com/BramGrammer/fairway/commit/ecee8fab1f105c14895f1d391b6c0541dfce2cec))
+* no scrollbar flashing in the top bar while a button is pressed ([8199f9d](https://github.com/BramGrammer/fairway/commit/8199f9df6078253cea68b13b3b2d1cd49ea536a1))
+* show one clear button in the search fields, the app's own ([0e73f45](https://github.com/BramGrammer/fairway/commit/0e73f45b4935eabb14507248f48cb3295271980e))
+
 ## [0.4.0](https://github.com/BramGrammer/fairway/compare/v0.3.1...v0.4.0) (2026-11-11)
 
 
