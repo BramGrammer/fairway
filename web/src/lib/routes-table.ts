@@ -1,4 +1,5 @@
 import type { Chip, Destination, Rule, Site } from "./api.js"
+import { parsePersistedTable, type PersistedTableOf } from "./table-state.js"
 
 export const COLUMN_IDS = ["host", "path", "destination", "middleware", "activity"] as const
 export type ColumnId = (typeof COLUMN_IDS)[number]
@@ -70,38 +71,9 @@ export const sortKeys = {
   middleware: (row: RouteRow) => middlewareCount(row),
 }
 
-export interface PersistedTable {
-  sorting: { id: ColumnId; desc: boolean }[]
-  visibility: Partial<Record<ColumnId, boolean>>
-}
-
-const isColumn = (id: unknown): id is ColumnId => COLUMN_IDS.includes(id as ColumnId)
+export type PersistedTable = PersistedTableOf<ColumnId>
 
 /** Reads stored table state; anything unexpected is dropped, never thrown. */
 export function parsePersisted(raw: string | null): PersistedTable {
-  const empty: PersistedTable = { sorting: [], visibility: {} }
-  if (!raw) return empty
-  let data: unknown
-  try {
-    data = JSON.parse(raw)
-  } catch {
-    return empty
-  }
-  if (typeof data !== "object" || data === null) return empty
-  const { sorting, visibility } = data as Record<string, unknown>
-  const out: PersistedTable = { sorting: [], visibility: {} }
-  if (Array.isArray(sorting)) {
-    for (const item of sorting) {
-      if (typeof item !== "object" || item === null) continue
-      const { id, desc } = item as Record<string, unknown>
-      if (isColumn(id) && id !== "activity" && typeof desc === "boolean") out.sorting.push({ id, desc })
-    }
-    out.sorting = out.sorting.slice(0, 1)
-  }
-  if (typeof visibility === "object" && visibility !== null && !Array.isArray(visibility)) {
-    for (const [id, value] of Object.entries(visibility)) {
-      if (isColumn(id) && typeof value === "boolean") out.visibility[id] = value
-    }
-  }
-  return out
+  return parsePersistedTable(raw, COLUMN_IDS, ["activity"])
 }

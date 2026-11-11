@@ -30,7 +30,7 @@ export function DataTable<TData>({ table, empty = "No results." }: DataTableProp
       <TableBody>
         {rows.length > 0 ? (
           rows.map((row) => (
-            <TableRow key={row.id}>
+            <TableRow key={row.id} className="group/row">
               {row.getVisibleCells().map((cell) => (
                 <TableCell key={cell.id} className="h-10 py-0 whitespace-nowrap first:pl-4 last:pr-4">
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}
