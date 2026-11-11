@@ -348,6 +348,7 @@ function Triggers({ view, save }: { view: AlertSettingsView; save: Save }) {
   return (
     <FieldSet>
       <FieldLegend>What sends an Alert</FieldLegend>
+      <p className="text-sm text-muted-foreground">These apply to every host. Choose which hosts send Alerts on the Routes page.</p>
       <FieldGroup className="gap-4">
         {groupTriggers(view).map((group) => (
           <div key={group.title} className="flex flex-col gap-1">

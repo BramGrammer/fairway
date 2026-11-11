@@ -229,3 +229,23 @@ test("the settings need a login when one is set", async () => {
     await r.cleanup();
   }
 });
+
+test("a host can be switched on, narrowed and snoozed, with or without a login", async () => {
+  for (const login of [false, true]) {
+    const r = await rig({ login });
+    try {
+      assert.deepEqual((await r.json("GET", "/api/settings/alerts")).body.hosts, {});
+      const on = await r.json("PUT", "/api/settings/alerts", { hosts: { "app.example.com": { enabled: true, kinds: { cert: false }, snoozeMinutes: 30 } } });
+      assert.equal(on.status, 200);
+      const host = on.body.hosts["app.example.com"];
+      assert.deepEqual([host.enabled, host.kinds], [true, { cert: false, host: true, upstream: true }]);
+      assert.ok(host.snoozedUntil > Date.now());
+      const cleared = await r.json("PUT", "/api/settings/alerts", { hosts: { "app.example.com": { snoozeMinutes: null } } });
+      assert.equal(cleared.body.hosts["app.example.com"].snoozedUntil, null);
+      assert.deepEqual((await r.json("PUT", "/api/settings/alerts", { hosts: { "app.example.com": null } })).body.hosts, {});
+      assert.equal((await r.json("PUT", "/api/settings/alerts", { hosts: { "app.example.com": { snoozeMinutes: 0 } } })).status, 400);
+    } finally {
+      await r.cleanup();
+    }
+  }
+});

@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { HostLogsTab } from "@/features/host-logs-tab"
+import { HostAlertsBlock } from "@/features/host-alerts"
 import { TimelineStrip } from "@/features/timeline-strip"
 import {
   activeTab,
@@ -143,6 +144,11 @@ export function RouteDrawer({ name, kind, overview, onClose }: RouteDrawerProps)
         {kind === "host" && tab === "overview" && (
           <div className="mb-4">
             <TimelineStrip host={hostFromLabel(name)} />
+          </div>
+        )}
+        {kind === "host" && tab === "overview" && hostFromLabel(name) !== "*" && (
+          <div className="mb-4">
+            <HostAlertsBlock host={name} />
           </div>
         )}
         {tab === "logs" ? <HostLogsTab host={hostFromLabel(name)} /> : overview}

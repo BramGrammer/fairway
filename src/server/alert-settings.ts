@@ -8,9 +8,36 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { DEFAULT_POLICY, TIMING_KEYS, TIMING_LIMITS, TRIGGER_KEYS, type AlertPolicy, type TimingKey, type TriggerKey } from "./alert-policy.js";
 import { NtfySender, type NtfyTarget } from "./alerts.js";
+import { subjectKind, subjectName, type AlertScope } from "./events.js";
 
 const FILE_VERSION = 1;
 const MAX_SAVED_TOPICS = 10;
+const MAX_HOSTS = 500;
+const MAX_SNOOZE_MIN = 7 * 24 * 60;
+
+/** What can send an Alert for a host. */
+export const HOST_KINDS = ["cert", "host", "upstream"] as const;
+export type HostKind = (typeof HOST_KINDS)[number];
+
+/** Alerts for one host. A host sends none until the Owner switches it on. */
+export interface HostAlerts {
+  enabled: boolean;
+  kinds: Record<HostKind, boolean>;
+  /** Alerts are held back until this time (ms). */
+  snoozedUntil?: number;
+}
+
+export interface HostPatch {
+  enabled?: boolean;
+  kinds?: Partial<Record<HostKind, boolean>>;
+  /** Hold alerts back for this many minutes; null ends a snooze. */
+  snoozeMinutes?: number | null;
+}
+
+/** Which hosts use which upstream, from the running config. */
+export interface RouteMap {
+  upstreamHosts: Map<string, string[]>;
+}
 
 export interface SavedTopic {
   id: string;
@@ -27,6 +54,7 @@ interface SavedSettings {
   disabledEnvTopics: string[];
   /** The empty string means "no link", which is different from "use the environment's". */
   publicUrl?: string;
+  hosts: Array<[string, HostAlerts]>;
   triggers: Partial<Record<TriggerKey, boolean>>;
   timing: Partial<Record<TimingKey, number>>;
 }
@@ -58,6 +86,8 @@ export interface SettingsView {
   publicUrl: { value: string | null; envDefault: string | null; overridden: boolean };
   triggers: Record<TriggerKey, { value: boolean; overridden: boolean }>;
   timing: Record<TimingKey, { value: number; default: number; overridden: boolean; min: number; max: number }>;
+  /** Only hosts the Owner has set something for; every other host sends no Alerts. */
+  hosts: Record<string, { enabled: boolean; kinds: Record<HostKind, boolean>; snoozedUntil: number | null }>;
 }
 
 export type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string };
@@ -67,6 +97,8 @@ export interface Patch {
   timing?: Partial<Record<TimingKey, number | null>>;
   /** A string overrides, the empty string means no link, null goes back to the environment's. */
   publicUrl?: string | null;
+  /** A host's alert settings; null forgets the host. */
+  hosts?: Record<string, HostPatch | null>;
 }
 
 export interface TopicPatch {
@@ -91,7 +123,12 @@ function validUrl(value: unknown): value is string {
 
 const envTopicId = (url: string) => `env:${createHash("sha256").update(url).digest("hex").slice(0, 8)}`;
 
-const empty = (): SavedSettings => ({ version: FILE_VERSION, topics: [], disabledEnvTopics: [], triggers: {}, timing: {} });
+const empty = (): SavedSettings => ({ version: FILE_VERSION, topics: [], disabledEnvTopics: [], hosts: [], triggers: {}, timing: {} });
+
+const validHostName = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0 && value.length <= 253 && !["__proto__", "constructor", "prototype"].includes(value);
+
+const quiet = (host: HostAlerts) => !host.enabled && host.snoozedUntil === undefined && HOST_KINDS.every((kind) => host.kinds[kind]);
 
 export class AlertSettings {
   private saved: SavedSettings = empty();
@@ -100,6 +137,7 @@ export class AlertSettings {
   constructor(
     private readonly env: AlertEnv,
     private readonly file?: string,
+    private readonly now: () => number = Date.now,
   ) {}
 
   /** Called after every change, with the new effective settings available from `effective()`. */
@@ -126,6 +164,14 @@ export class AlertSettings {
     }
     if (Array.isArray(data.disabledEnvTopics)) next.disabledEnvTopics = data.disabledEnvTopics.filter((id): id is string => typeof id === "string");
     if (typeof data.publicUrl === "string" && (data.publicUrl === "" || validUrl(data.publicUrl))) next.publicUrl = data.publicUrl;
+    if (Array.isArray(data.hosts)) {
+      for (const entry of data.hosts.slice(0, MAX_HOSTS)) {
+        if (!Array.isArray(entry) || !validHostName(entry[0]) || !isRecord(entry[1]) || typeof entry[1].enabled !== "boolean" || !isRecord(entry[1].kinds)) continue;
+        const kinds = {} as Record<HostKind, boolean>;
+        for (const kind of HOST_KINDS) kinds[kind] = typeof entry[1].kinds[kind] === "boolean" ? (entry[1].kinds[kind] as boolean) : true;
+        next.hosts.push([entry[0], { enabled: entry[1].enabled, kinds, ...(typeof entry[1].snoozedUntil === "number" && { snoozedUntil: entry[1].snoozedUntil }) }]);
+      }
+    }
     if (isRecord(data.triggers)) for (const key of TRIGGER_KEYS) if (typeof data.triggers[key] === "boolean") next.triggers[key] = data.triggers[key];
     if (isRecord(data.timing)) {
       for (const key of TIMING_KEYS) {
@@ -167,7 +213,10 @@ export class AlertSettings {
     for (const key of TRIGGER_KEYS) triggers[key] = { value: policy.triggers[key], overridden: this.saved.triggers[key] !== undefined };
     const timing = {} as SettingsView["timing"];
     for (const key of TIMING_KEYS) timing[key] = { value: policy[key], default: DEFAULT_POLICY[key], overridden: this.saved.timing[key] !== undefined, ...TIMING_LIMITS[key] };
+    const hosts: SettingsView["hosts"] = {};
+    for (const [host, config] of this.saved.hosts) hosts[host] = { enabled: config.enabled, kinds: { ...config.kinds }, snoozedUntil: config.snoozedUntil ?? null };
     return {
+      hosts,
       topics: topics.map((topic) => ({
         id: topic.id,
         name: topic.name,
@@ -214,7 +263,68 @@ export class AlertSettings {
       else if (patch.publicUrl === "" || validUrl(patch.publicUrl)) next.publicUrl = patch.publicUrl;
       else return { ok: false, error: "The public address must start with http:// or https://." };
     }
+    if (patch.hosts !== undefined) {
+      if (typeof patch.hosts !== "object" || patch.hosts === null) return { ok: false, error: "hosts must be an object." };
+      const map = new Map(next.hosts);
+      for (const [host, change] of Object.entries(patch.hosts)) {
+        if (!validHostName(host)) return { ok: false, error: "That is not a host name." };
+        if (change === null) {
+          map.delete(host);
+          continue;
+        }
+        const failed = this.applyHostPatch(map, host, change);
+        if (failed) return { ok: false, error: failed };
+      }
+      if (map.size > MAX_HOSTS) return { ok: false, error: `Alerts can be set for at most ${MAX_HOSTS} hosts.` };
+      next.hosts = [...map];
+    }
     return this.commit(next);
+  }
+
+  /** Changes one host's entry in `map`; returns a reason when the change is not allowed. */
+  private applyHostPatch(map: Map<string, HostAlerts>, host: string, change: HostPatch): string | null {
+    if (typeof change !== "object") return "A host's settings must be an object.";
+    const current = map.get(host) ?? { enabled: false, kinds: { cert: true, host: true, upstream: true } };
+    const next: HostAlerts = { ...current, kinds: { ...current.kinds } };
+    if (change.enabled !== undefined) {
+      if (typeof change.enabled !== "boolean") return "enabled must be true or false.";
+      next.enabled = change.enabled;
+    }
+    for (const [kind, value] of Object.entries(change.kinds ?? {})) {
+      if (!(HOST_KINDS as readonly string[]).includes(kind)) return `Unknown kind: ${kind}`;
+      if (typeof value !== "boolean") return `${kind} must be true or false.`;
+      next.kinds[kind as HostKind] = value;
+    }
+    if (change.snoozeMinutes !== undefined) {
+      if (change.snoozeMinutes === null) delete next.snoozedUntil;
+      else if (Number.isInteger(change.snoozeMinutes) && change.snoozeMinutes >= 1 && change.snoozeMinutes <= MAX_SNOOZE_MIN) next.snoozedUntil = this.now() + change.snoozeMinutes * 60_000;
+      else return `A snooze is from 1 minute to ${MAX_SNOOZE_MIN / 60 / 24} days.`;
+    }
+    if (quiet(next)) map.delete(host);
+    else map.set(host, next);
+    return null;
+  }
+
+  /**
+   * Which Subjects may send an Alert: a host's Certificate, host check and upstreams only when the Owner switched
+   * that host on for that kind and it is not snoozed. An upstream shared by several hosts alerts while any of them is
+   * on. Caddy itself is not about a host and is left to the global switches.
+   */
+  scope(routes: () => RouteMap): AlertScope {
+    return (subject, now) => {
+      const kind = subjectKind(subject);
+      if (kind === "caddy") return { send: true };
+      const config = new Map(this.saved.hosts);
+      const alerting = (host: string, hostKind: HostKind) => {
+        const entry = config.get(host);
+        return entry !== undefined && entry.enabled && entry.kinds[hostKind] && (entry.snoozedUntil === undefined || entry.snoozedUntil <= now);
+      };
+      if (kind === "upstream") {
+        const hosts = (routes().upstreamHosts.get(subject) ?? []).filter((host) => alerting(host, "upstream"));
+        return { send: hosts.length > 0, hosts };
+      }
+      return { send: alerting(subjectName(subject), kind) };
+    };
   }
 
   async addTopic(input: { name: string; url: string; token?: string | null }): Promise<Result<{ id: string }>> {

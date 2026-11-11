@@ -110,6 +110,7 @@ These variables are the defaults. **Settings › Alerts** changes them without a
 - **What sends an Alert:** a switch for each kind of Subject, for a refused Deploy, an outside edit, a Rollback (off by default), for recovery messages and for the flapping message.
 - **Timing:** how long Caddy and upstreams must fail before they count as down, and the flapping limits.
 - **Public address:** `PUBLIC_URL` is its default.
+- **Which hosts send Alerts:** none do until you switch them on, in the route drawer on the Routes page. A host's switch has a menu to pick what it sends for (its Certificate, the host check, the upstreams it uses) and to snooze it for an hour or a day. An upstream shared by several hosts alerts while any of them is on, and its message names them. Caddy itself, a refused Deploy and an outside edit are not about a host and follow the switches above. A host that leaves the Caddyfile keeps its settings. Muted hosts are still watched: the history and timeline record everything.
 - Adding, changing or removing a topic address or token needs login (see [Login](#login)); without it only the switches, the timing and switching topics on or off can be changed. Anyone who can reach an open Fairway could otherwise point its requests anywhere.
 
 - Sent for: a Certificate turning amber or red, an upstream or Caddy going down, the recovery of each, a Deploy that Caddy refused, and a Caddyfile that was changed outside Fairway. A Rollback only appears in the history.

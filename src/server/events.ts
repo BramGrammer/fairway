@@ -78,7 +78,7 @@ export function subjectKind(subject: string): SubjectKind {
   return prefix === "cert" || prefix === "upstream" || prefix === "host" ? prefix : "host";
 }
 
-const subjectName = (subject: string) => (subject === "caddy" ? "Caddy" : subject.slice(subject.indexOf(":") + 1));
+export const subjectName = (subject: string) => (subject === "caddy" ? "Caddy" : subject.slice(subject.indexOf(":") + 1));
 
 function describe(subject: string, state: StateName, previous: StateName | null, detail?: string): string {
   const name = subjectName(subject);
@@ -94,6 +94,13 @@ function describe(subject: string, state: StateName, previous: StateName | null,
     case "host":
       return state === "ok" ? `${name} answers${recovered ? " again" : ""}` : `${name} is not answering properly${extra}`;
   }
+}
+
+/** An upstream's message says which of the hosts that use it are alerting. */
+function withHosts(subject: string, message: string, hosts: string[] | undefined): string {
+  if (subjectKind(subject) !== "upstream" || !hosts || hosts.length === 0) return message;
+  const shown = hosts.slice(0, 5).join(", ");
+  return `${message}, used by ${shown}${hosts.length > 5 ? ` and ${hosts.length - 5} more` : ""}`;
 }
 
 const severity: Record<StateName, number> = { ok: 0, warning: 1, down: 2 };
@@ -117,6 +124,9 @@ function validSubject(value: unknown): value is [string, SubjectState] {
   return Array.isArray(value) && typeof value[0] === "string" && isRecord(value[1]) && isState(value[1].state) && isNumber(value[1].since);
 }
 
+/** Decides, per Subject, whether an Alert may be sent for it, and which hosts it would be about. */
+export type AlertScope = (subject: string, now: number) => { send: boolean; hosts?: string[] };
+
 export interface EventTrackerOptions {
   /** `events.json`; without it nothing is persisted. */
   file?: string;
@@ -131,6 +141,7 @@ export class EventTracker {
   private sender: AlertSender | null;
   private publicUrl: string | null;
   private policy: AlertPolicy = DEFAULT_POLICY;
+  private scope: AlertScope | null = null;
   private readonly clock: () => number;
   private events: EventRecord[] = [];
   private subjects = new Map<string, SubjectState>();
@@ -152,7 +163,8 @@ export class EventTracker {
   }
 
   /** Changes where Alerts go, what sends one and how long things must hold, with effect from the next reading. */
-  configure(settings: { sender?: AlertSender | null; publicUrl?: string | null; policy?: AlertPolicy }): void {
+  configure(settings: { sender?: AlertSender | null; publicUrl?: string | null; policy?: AlertPolicy; scope?: AlertScope | null }): void {
+    if (settings.scope !== undefined) this.scope = settings.scope;
     if (settings.sender !== undefined) this.sender = settings.sender;
     if (settings.publicUrl !== undefined) this.publicUrl = settings.publicUrl;
     if (settings.policy) this.policy = settings.policy;
@@ -370,6 +382,8 @@ export class EventTracker {
 
     if (state === "ok" && previous === null) return; // the first sighting of a healthy Subject is not news
     if (!this.policy.triggers[subjectKind(subject)]) return;
+    const scope = this.scope?.(subject, now) ?? { send: true };
+    if (!scope.send) return;
     if (current.muted) return;
 
     const changes = this.events.filter((e) => e.kind === "state" && e.subject === subject && e.previous !== null && e.at > now - FLAP_WINDOW_MS).length;
@@ -380,7 +394,7 @@ export class EventTracker {
       return;
     }
     if (state === "ok" && !this.policy.triggers.recovery) return;
-    this.alert(event, { event: "state", subject, state, previous, since: at, message });
+    this.alert(event, { event: "state", subject, state, previous, since: at, message: withHosts(subject, message, scope.hosts) });
   }
 
   /** A flapping Subject that has been stable for a while is announced once and un-muted. */
@@ -390,7 +404,7 @@ export class EventTracker {
     current.muted = false;
     const message = `${describe(subject, current.state, null)} (settled)`;
     const event = this.add({ at: now, kind: "flapping", subject, state: current.state, message });
-    if (this.policy.triggers.flapping && this.policy.triggers[subjectKind(subject)]) {
+    if (this.policy.triggers.flapping && this.policy.triggers[subjectKind(subject)] && (this.scope?.(subject, now) ?? { send: true }).send) {
       this.alert(event, { event: "flapping", subject, state: current.state, previous: null, since: current.since, message });
     }
   }

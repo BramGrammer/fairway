@@ -177,3 +177,93 @@ test("a failing write is reported and leaves the settings as they were", async (
   assert.equal(result.ok, false);
   assert.equal(s.effective().policy.triggers.cert, true);
 });
+
+// ---- per host ----
+
+const T0 = Date.UTC(2026, 0, 1);
+const MIN = 60_000;
+const routes = (map: Record<string, string[]> = {}) => () => ({ upstreamHosts: new Map(Object.entries(map)) });
+
+test("a host sends no Alerts until it is switched on", async () => {
+  const s = new AlertSettings(NONE);
+  const scope = s.scope(routes());
+  assert.equal(scope("cert:a.test", T0).send, false);
+  assert.equal(scope("host:a.test", T0).send, false);
+  assert.equal(scope("caddy", T0).send, true); // Caddy is not about a host
+  assert.equal((await s.patch({ hosts: { "a.test": { enabled: true } } })).ok, true);
+  assert.equal(scope("cert:a.test", T0).send, true);
+  assert.equal(scope("host:a.test", T0).send, true);
+  assert.equal(scope("cert:b.test", T0).send, false);
+});
+
+test("each kind can be switched off for a host", async () => {
+  const s = new AlertSettings(NONE);
+  const scope = s.scope(routes({ "upstream:app:80": ["a.test"] }));
+  await s.patch({ hosts: { "a.test": { enabled: true, kinds: { cert: false } } } });
+  assert.equal(scope("cert:a.test", T0).send, false);
+  assert.equal(scope("host:a.test", T0).send, true);
+  assert.equal(scope("upstream:app:80", T0).send, true);
+  await s.patch({ hosts: { "a.test": { kinds: { upstream: false } } } });
+  assert.equal(scope("upstream:app:80", T0).send, false);
+  assert.deepEqual(s.view(false).hosts["a.test"], { enabled: true, kinds: { cert: false, host: true, upstream: false }, snoozedUntil: null });
+});
+
+test("a shared upstream alerts while any of its hosts is on, and names those hosts", async () => {
+  const s = new AlertSettings(NONE);
+  const scope = s.scope(routes({ "upstream:app:80": ["a.test", "b.test", "c.test"], "upstream:only-c:80": ["c.test"] }));
+  assert.equal(scope("upstream:app:80", T0).send, false);
+  await s.patch({ hosts: { "a.test": { enabled: true }, "c.test": { enabled: true } } });
+  assert.deepEqual(scope("upstream:app:80", T0), { send: true, hosts: ["a.test", "c.test"] });
+  await s.patch({ hosts: { "a.test": { enabled: false }, "c.test": { enabled: false } } });
+  assert.equal(scope("upstream:app:80", T0).send, false);
+  assert.equal(scope("upstream:unknown:80", T0).send, false);
+});
+
+test("a snooze holds a host's Alerts back until it ends, and can be ended early", async () => {
+  let now = T0;
+  const s = new AlertSettings(NONE, undefined, () => now);
+  const scope = s.scope(routes());
+  await s.patch({ hosts: { "a.test": { enabled: true, snoozeMinutes: 60 } } });
+  assert.equal(s.view(false).hosts["a.test"].snoozedUntil, T0 + 60 * MIN);
+  assert.equal(scope("cert:a.test", T0 + 59 * MIN).send, false);
+  assert.equal(scope("cert:a.test", T0 + 61 * MIN).send, true);
+  await s.patch({ hosts: { "a.test": { snoozeMinutes: 120 } } });
+  assert.equal(scope("cert:a.test", now + 10 * MIN).send, false);
+  await s.patch({ hosts: { "a.test": { snoozeMinutes: null } } });
+  assert.equal(scope("cert:a.test", now + 10 * MIN).send, true);
+  assert.equal((await s.patch({ hosts: { "a.test": { snoozeMinutes: 0 } } })).ok, false);
+  assert.equal((await s.patch({ hosts: { "a.test": { snoozeMinutes: 100000 } } })).ok, false);
+});
+
+test("a host that is back to its quiet state is forgotten; null forgets it too", async () => {
+  const s = new AlertSettings(NONE);
+  await s.patch({ hosts: { "a.test": { enabled: true }, "b.test": { enabled: true } } });
+  await s.patch({ hosts: { "a.test": { enabled: false } } });
+  assert.deepEqual(Object.keys(s.view(false).hosts), ["b.test"]);
+  await s.patch({ hosts: { "b.test": null } });
+  assert.deepEqual(s.view(false).hosts, {});
+});
+
+test("hosts that left the config stay set, and come back set", async () => {
+  const file = await fileIn();
+  const a = new AlertSettings(NONE, file);
+  await a.patch({ hosts: { "gone.test": { enabled: true, kinds: { host: false } } } });
+  const b = new AlertSettings(NONE, file);
+  await b.load();
+  assert.deepEqual(b.view(false).hosts["gone.test"], { enabled: true, kinds: { cert: true, host: false, upstream: true }, snoozedUntil: null });
+});
+
+test("bad host settings are refused and change nothing", async () => {
+  const s = new AlertSettings(NONE);
+  for (const bad of [
+    '{"":{"enabled":true}}',
+    '{"__proto__":{"enabled":true}}',
+    '{"a.test":{"enabled":"yes"}}',
+    '{"a.test":{"kinds":{"nonsense":true}}}',
+    '{"a.test":{"kinds":{"cert":"no"}}}',
+  ]) {
+    const result = await s.patch({ hosts: JSON.parse(bad) as never });
+    assert.equal(result.ok, false, bad);
+  }
+  assert.deepEqual(s.view(false).hosts, {});
+});

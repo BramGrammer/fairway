@@ -30,7 +30,23 @@ export interface TimingView {
   max: number
 }
 
+export type HostKind = "cert" | "host" | "upstream"
+
+export interface HostAlertView {
+  enabled: boolean
+  kinds: Record<HostKind, boolean>
+  snoozedUntil: number | null
+}
+
+export interface HostAlertPatch {
+  enabled?: boolean
+  kinds?: Partial<Record<HostKind, boolean>>
+  snoozeMinutes?: number | null
+}
+
 export interface AlertSettingsView {
+  /** Only the hosts the Owner set something for; any other host sends no Alerts. */
+  hosts?: Record<string, HostAlertView>
   canEditSecrets: boolean
   topics: TopicView[]
   publicUrl: { value: string | null; envDefault: string | null; overridden: boolean }
@@ -44,6 +60,7 @@ export interface PutBody {
   triggers?: Partial<Record<TriggerKey, boolean | null>>
   timing?: Partial<Record<TimingKey, number | null>>
   publicUrl?: string | null
+  hosts?: Record<string, HostAlertPatch | null>
 }
 
 export interface TopicForm {

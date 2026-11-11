@@ -360,6 +360,32 @@ test("a test can go to one given sender, even when none is configured", async ()
   assert.equal(one.sent[0].test, true);
 });
 
+test("the scope decides per Subject whether an Alert may go out; the event is recorded either way", async () => {
+  const { sent, sender } = fakeSender();
+  const t = new EventTracker({ sender });
+  t.configure({ scope: (subject) => ({ send: subject === "cert:wanted.test" }) });
+  for (const host of ["wanted.test", "quiet.test"]) {
+    t.observe(`cert:${host}`, "ok", undefined, T0);
+    t.observe(`cert:${host}`, "down", "expired", T0 + MIN);
+  }
+  await t.flush();
+  assert.deepEqual(sent.map((p) => p.subject), ["cert:wanted.test"]);
+  assert.equal(t.stateOf("cert:quiet.test"), "down");
+  assert.equal(t.list({ subject: "cert:quiet.test" })[0].delivery, undefined);
+});
+
+test("an upstream's Alert names the hosts that are alerting", async () => {
+  const { sent, sender } = fakeSender();
+  const t = new EventTracker({ sender });
+  t.configure({ scope: () => ({ send: true, hosts: ["a.test", "b.test"] }) });
+  t.observe("upstream:app:80", "ok", undefined, T0);
+  t.observe("upstream:app:80", "down", undefined, T0 + MIN);
+  t.observe("upstream:app:80", "down", undefined, T0 + 2 * MIN);
+  await t.flush();
+  assert.match(sent[0].message, /Upstream app:80 is down, used by a\.test, b\.test$/);
+  assert.doesNotMatch(t.list()[0].message, /used by/); // the history keeps the plain message
+});
+
 // ---- the ntfy sender ----
 
 const payload: AlertPayload = { event: "state", subject: "caddy", state: "down", previous: "ok", since: new Date(T0).toISOString(), message: "Caddy is not answering", link: "https://fairway.example.test" };

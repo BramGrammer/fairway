@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { join } from "node:path";
 import { createAuth, parseTrustProxy } from "./auth.js";
-import { AlertSettings, type Patch, type TopicPatch } from "./alert-settings.js";
+import { AlertSettings, type Patch, type RouteMap, type TopicPatch } from "./alert-settings.js";
 import { parseNtfyUrls } from "./alerts.js";
 import { CaddyAdmin } from "./caddy-admin.js";
 import type { Config } from "./config.js";
@@ -40,9 +40,30 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
   );
   await alertSettings.load();
   const events = new EventTracker({ file: join(config.dataDir, "events.json") });
+  // Which hosts use which upstream, so an upstream's Alert can be left out when none of its hosts want one.
+  let routeMap: RouteMap = { upstreamHosts: new Map() };
+  const refreshRouteMap = async () => {
+    const servers = await admin.liveServers();
+    if (!servers.ok) return; // keep what we knew
+    const upstreamHosts = new Map<string, string[]>();
+    for (const site of summarizeRoutes(servers.servers)) {
+      for (const rule of site.rules) {
+        for (const destination of rule.destinations) {
+          for (const upstream of destination.upstreams ?? []) {
+            const hosts = upstreamHosts.get(upstreamKey(upstream)) ?? [];
+            for (const host of site.hosts) if (!hosts.includes(host)) hosts.push(host);
+            upstreamHosts.set(upstreamKey(upstream), hosts);
+          }
+        }
+      }
+    }
+    routeMap = { upstreamHosts };
+  };
+  await refreshRouteMap();
+  setInterval(() => void refreshRouteMap(), 15_000).unref();
   const applyAlertSettings = () => {
     const { publicUrl, policy } = alertSettings.effective();
-    events.configure({ sender: alertSettings.sender(), publicUrl, policy });
+    events.configure({ sender: alertSettings.sender(), publicUrl, policy, scope: alertSettings.scope(() => routeMap) });
   };
   applyAlertSettings();
   alertSettings.onChange(applyAlertSettings);
@@ -249,7 +270,7 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
   app.put("/api/settings/alerts", async (c) => {
     const body = await c.req.json<Patch>().catch(() => null);
     if (!body || typeof body !== "object") return c.json({ ok: false, error: "Send a JSON object." }, 400);
-    const result = await alertSettings.patch({ triggers: body.triggers, timing: body.timing, publicUrl: body.publicUrl });
+    const result = await alertSettings.patch({ triggers: body.triggers, timing: body.timing, publicUrl: body.publicUrl, hosts: body.hosts });
     return result.ok ? c.json(settingsView()) : c.json(result, answer(result));
   });
 
@@ -305,6 +326,7 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
   const runDeploy = async (run: () => ReturnType<Deployer["deploy"]>) => {
     try {
       const result = await run();
+      void refreshRouteMap();
       return { status: 200 as const, body: { ok: true, ...result, hash: result.revision.hash } };
     } catch (error) {
       if (error instanceof DeployError) {
