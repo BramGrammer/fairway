@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/BramGrammer/fairway/compare/v0.3.1...v0.4.0) (2026-11-11)
+
+
+### Features
+
+* change alert settings from the interface ([6d9ffb5](https://github.com/BramGrammer/fairway/commit/6d9ffb5480174df17759a75cef60468b2aa8e419))
+* choose which hosts send Alerts on the Routes page ([3f96b7a](https://github.com/BramGrammer/fairway/commit/3f96b7a1409249f282b3aacacbcf397f61a45f84))
+* event history and ntfy alerts, with settings and per-host choice ([84b6ea6](https://github.com/BramGrammer/fairway/commit/84b6ea60181233f6a3bce5621fb76c849a10eb19))
+* keep a history of Subject States and send Alerts through ntfy ([a70b7f9](https://github.com/BramGrammer/fairway/commit/a70b7f9668c670f9fde946ed9a47d810b7745457))
+* **metrics:** keep traffic history across restarts ([66b9868](https://github.com/BramGrammer/fairway/commit/66b9868c30481a41fc8f4dc203e02b09a4650f41))
+* **metrics:** keep traffic history across restarts ([3936b6d](https://github.com/BramGrammer/fairway/commit/3936b6d1d7885e9c2ab85ad61f174690a5d7cee6))
+* **web:** add a settings dialog with a sidebar of categories ([ad80659](https://github.com/BramGrammer/fairway/commit/ad80659e5108c60593b2c779d956946d8bdc7d55))
+
 ## [0.3.1](https://github.com/BramGrammer/fairway/compare/v0.3.0...v0.3.1) (2026-11-10)
 
 
