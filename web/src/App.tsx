@@ -221,7 +221,8 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
           <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
           <h1 className="font-heading font-medium">{current.label}</h1>
           <div ref={setTitleSlot} className="flex shrink-0 items-center gap-2" />
-          <div ref={setTopBarSlot} className="ml-auto flex min-w-0 items-center gap-2 overflow-x-auto" />
+          {/* The padding, undone by the negative margin, leaves room for the 1px a pressed button moves and for focus rings; without it they overflow and a scrollbar appears. */}
+          <div ref={setTopBarSlot} className="-mr-1 -my-1 ml-auto flex min-w-0 items-center gap-2 overflow-x-auto p-1" />
         </header>
 
         <div hidden={view !== "editor"} className="min-h-0 flex-1">
