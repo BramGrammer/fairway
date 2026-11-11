@@ -4,11 +4,11 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { readFile } from "node:fs/promises";
 import { DEFAULT_POLICY, TIMING_KEYS, TIMING_LIMITS, TRIGGER_KEYS, type AlertPolicy, type TimingKey, type TriggerKey } from "./alert-policy.js";
 import { NtfySender, type NtfyTarget } from "./alerts.js";
 import { subjectKind, subjectName, type AlertScope } from "./events.js";
+import { isRecord, writeJsonAtomic } from "./json-file.js";
 
 const FILE_VERSION = 1;
 const MAX_SAVED_TOPICS = 10;
@@ -109,7 +109,19 @@ export interface TopicPatch {
   enabled?: boolean;
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+const validTiming = (key: TimingKey, value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value) && value >= TIMING_LIMITS[key].min && value <= TIMING_LIMITS[key].max;
+
+const defaultKinds = (): Record<HostKind, boolean> => ({ cert: true, host: true, upstream: true });
+
+const NAME_ERROR = "Give the topic a name of up to 60 characters.";
+const TOKEN_ERROR = "The token is too long.";
+const URL_ERROR = "The topic address must start with http:// or https://.";
+const cleanName = (value: unknown): string | null => {
+  const name = typeof value === "string" ? value.trim() : "";
+  return name && name.length <= 60 ? name : null;
+};
+const validToken = (value: unknown): value is string => typeof value === "string" && value.length <= 500;
 
 function validUrl(value: unknown): value is string {
   if (typeof value !== "string" || value.length > 2000) return false;
@@ -133,6 +145,7 @@ const quiet = (host: HostAlerts) => !host.enabled && host.snoozedUntil === undef
 export class AlertSettings {
   private saved: SavedSettings = empty();
   private listeners: Array<() => void> = [];
+  private hostLookup: Map<string, HostAlerts> | null = null;
 
   constructor(
     private readonly env: AlertEnv,
@@ -176,10 +189,11 @@ export class AlertSettings {
     if (isRecord(data.timing)) {
       for (const key of TIMING_KEYS) {
         const value = data.timing[key];
-        if (typeof value === "number" && Number.isInteger(value) && value >= TIMING_LIMITS[key].min && value <= TIMING_LIMITS[key].max) next.timing[key] = value;
+        if (validTiming(key, value)) next.timing[key] = value;
       }
     }
     this.saved = next;
+    this.hostLookup = null;
   }
 
   /** The settings in force: the environment's, with the Owner's changes on top. */
@@ -255,7 +269,7 @@ export class AlertSettings {
       if (!(TIMING_KEYS as string[]).includes(key)) return { ok: false, error: `Unknown setting: ${key}` };
       const limits = TIMING_LIMITS[key as TimingKey];
       if (value === null) delete next.timing[key as TimingKey];
-      else if (typeof value === "number" && Number.isInteger(value) && value >= limits.min && value <= limits.max) next.timing[key as TimingKey] = value;
+      else if (validTiming(key as TimingKey, value)) next.timing[key as TimingKey] = value;
       else return { ok: false, error: `${key} must be a whole number from ${limits.min} to ${limits.max}.` };
     }
     if (patch.publicUrl !== undefined) {
@@ -284,7 +298,7 @@ export class AlertSettings {
   /** Changes one host's entry in `map`; returns a reason when the change is not allowed. */
   private applyHostPatch(map: Map<string, HostAlerts>, host: string, change: HostPatch): string | null {
     if (typeof change !== "object") return "A host's settings must be an object.";
-    const current = map.get(host) ?? { enabled: false, kinds: { cert: true, host: true, upstream: true } };
+    const current = map.get(host) ?? { enabled: false, kinds: defaultKinds() };
     const next: HostAlerts = { ...current, kinds: { ...current.kinds } };
     if (change.enabled !== undefined) {
       if (typeof change.enabled !== "boolean") return "enabled must be true or false.";
@@ -314,7 +328,7 @@ export class AlertSettings {
     return (subject, now) => {
       const kind = subjectKind(subject);
       if (kind === "caddy") return { send: true };
-      const config = new Map(this.saved.hosts);
+      const config = this.hostConfig();
       const alerting = (host: string, hostKind: HostKind) => {
         const entry = config.get(host);
         return entry !== undefined && entry.enabled && entry.kinds[hostKind] && (entry.snoozedUntil === undefined || entry.snoozedUntil <= now);
@@ -328,10 +342,10 @@ export class AlertSettings {
   }
 
   async addTopic(input: { name: string; url: string; token?: string | null }): Promise<Result<{ id: string }>> {
-    const name = typeof input.name === "string" ? input.name.trim() : "";
-    if (!name || name.length > 60) return { ok: false, error: "Give the topic a name of up to 60 characters." };
-    if (!validUrl(input.url)) return { ok: false, error: "The topic address must start with http:// or https://." };
-    if (input.token != null && (typeof input.token !== "string" || input.token.length > 500)) return { ok: false, error: "The token is too long." };
+    const name = cleanName(input.name);
+    if (!name) return { ok: false, error: NAME_ERROR };
+    if (!validUrl(input.url)) return { ok: false, error: URL_ERROR };
+    if (input.token != null && !validToken(input.token)) return { ok: false, error: TOKEN_ERROR };
     if (this.saved.topics.length >= MAX_SAVED_TOPICS) return { ok: false, error: `At most ${MAX_SAVED_TOPICS} topics can be added.` };
     const next = structuredClone(this.saved);
     const id = `t_${randomBytes(4).toString("hex")}`;
@@ -354,18 +368,18 @@ export class AlertSettings {
       return this.commit(next);
     }
     if (patch.name !== undefined) {
-      const name = typeof patch.name === "string" ? patch.name.trim() : "";
-      if (!name || name.length > 60) return { ok: false, error: "Give the topic a name of up to 60 characters." };
+      const name = cleanName(patch.name);
+      if (!name) return { ok: false, error: NAME_ERROR };
       target.name = name;
     }
     if (patch.url !== undefined) {
-      if (!validUrl(patch.url)) return { ok: false, error: "The topic address must start with http:// or https://." };
+      if (!validUrl(patch.url)) return { ok: false, error: URL_ERROR };
       target.url = patch.url;
     }
     if (patch.token !== undefined) {
       if (patch.token === null || patch.token === "") delete target.token;
-      else if (typeof patch.token === "string" && patch.token.length <= 500) target.token = patch.token;
-      else return { ok: false, error: "The token is too long." };
+      else if (validToken(patch.token)) target.token = patch.token;
+      else return { ok: false, error: TOKEN_ERROR };
     }
     if (patch.enabled !== undefined) {
       if (typeof patch.enabled !== "boolean") return { ok: false, error: "enabled must be true or false." };
@@ -383,13 +397,21 @@ export class AlertSettings {
     return this.commit(next);
   }
 
+  /** The per-host settings as a lookup, rebuilt only when they change. */
+  private hostConfig(): Map<string, HostAlerts> {
+    this.hostLookup ??= new Map(this.saved.hosts);
+    return this.hostLookup;
+  }
+
   private async commit(next: SavedSettings): Promise<Result> {
     const previous = this.saved;
     this.saved = next;
+    this.hostLookup = null;
     try {
       await this.write();
     } catch {
       this.saved = previous;
+      this.hostLookup = null;
       return { ok: false, error: "Could not save the settings." };
     }
     for (const listener of this.listeners) listener();
@@ -398,9 +420,6 @@ export class AlertSettings {
 
   private async write(): Promise<void> {
     if (!this.file) return;
-    await mkdir(dirname(this.file), { recursive: true });
-    const tmp = `${this.file}.tmp`;
-    await writeFile(tmp, JSON.stringify(this.saved), { mode: 0o600 });
-    await rename(tmp, this.file);
+    await writeJsonAtomic(this.file, this.saved, 0o600);
   }
 }

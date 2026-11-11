@@ -1,5 +1,5 @@
 /** Per-host Alert settings: defaults, snooze wording, the bell state and the PUT bodies. */
-import type { HostAlertView, HostKind, PutBody } from "./alert-settings"
+import type { HostAlertView, HostKind } from "./alert-settings"
 
 export const HOST_KINDS: Array<{ key: HostKind; label: string; description: string }> = [
   { key: "cert", label: "Certificate", description: "Certificate turns amber or red" },
@@ -51,11 +51,3 @@ export function describeBell(alerts: HostAlertView, now: number = Date.now()): s
   if (state === "off") return "Alerts off"
   return `Alerts snoozed until ${formatSnoozeEnd(alerts.snoozedUntil as number, now)}`
 }
-
-export const toggleBody = (host: string, enabled: boolean): PutBody => ({ hosts: { [host]: { enabled } } })
-export const kindBody = (host: string, kind: HostKind, value: boolean): PutBody => ({
-  hosts: { [host]: { kinds: { [kind]: value } } },
-})
-export const snoozeBody = (host: string, minutes: number | null): PutBody => ({
-  hosts: { [host]: { snoozeMinutes: minutes } },
-})

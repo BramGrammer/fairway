@@ -1,6 +1,6 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { readFile } from "node:fs/promises";
 import type { CaddyAdmin } from "./caddy-admin.js";
+import { isNumber, isRecord, writeJsonAtomic } from "./json-file.js";
 
 export interface Counters {
   /** Requests seen since Caddy started. */
@@ -152,8 +152,6 @@ interface SavedMetrics {
   buckets: SavedSlice[];
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-const isNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const CODE_KEYS = ["2xx", "3xx", "4xx", "5xx", "other"];
 
 function validCodes(v: unknown): boolean {
@@ -256,10 +254,7 @@ export class MetricsTracker {
       samples: slices(this.samples),
       buckets: slices(this.buckets),
     };
-    await mkdir(dirname(this.file), { recursive: true });
-    const tmp = `${this.file}.tmp`;
-    await writeFile(tmp, JSON.stringify(data));
-    await rename(tmp, this.file);
+    await writeJsonAtomic(this.file, data);
   }
 
   private async poll(): Promise<void> {

@@ -14,6 +14,7 @@ import { formatCaddyfile } from "./format.js";
 import { parseHostLines, readHostLog, resolutionKey, resolveHostLogFile } from "./host-logs.js";
 import { LogFollower, tailLines } from "./logs.js";
 import { MetricsTracker, WINDOWS_MS } from "./metrics.js";
+import { buildRouteMap } from "./route-map.js";
 import { summarizeRoutes } from "./routes.js";
 import { Store } from "./store.js";
 import { lastIssuanceError } from "./issuance.js";
@@ -44,23 +45,10 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
   let routeMap: RouteMap = { upstreamHosts: new Map() };
   const refreshRouteMap = async () => {
     const servers = await admin.liveServers();
-    if (!servers.ok) return; // keep what we knew
-    const upstreamHosts = new Map<string, string[]>();
-    for (const site of summarizeRoutes(servers.servers)) {
-      for (const rule of site.rules) {
-        for (const destination of rule.destinations) {
-          for (const upstream of destination.upstreams ?? []) {
-            const hosts = upstreamHosts.get(upstreamKey(upstream)) ?? [];
-            for (const host of site.hosts) if (!hosts.includes(host)) hosts.push(host);
-            upstreamHosts.set(upstreamKey(upstream), hosts);
-          }
-        }
-      }
-    }
-    routeMap = { upstreamHosts };
+    if (servers.ok) routeMap = buildRouteMap(servers.servers); // otherwise keep what we knew
   };
   await refreshRouteMap();
-  setInterval(() => void refreshRouteMap(), 15_000).unref();
+  setInterval(() => void refreshRouteMap(), 60_000).unref(); // a Deploy refreshes it at once
   const applyAlertSettings = () => {
     const { publicUrl, policy } = alertSettings.effective();
     events.configure({ sender: alertSettings.sender(), publicUrl, policy, scope: alertSettings.scope(() => routeMap) });

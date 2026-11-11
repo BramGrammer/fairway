@@ -7,9 +7,6 @@ import {
   formatSnoozeEnd,
   hostAlertsOf,
   isSnoozed,
-  kindBody,
-  snoozeBody,
-  toggleBody,
 } from "../web/src/lib/host-alerts.js";
 
 const on = { enabled: true, kinds: { cert: true, host: true, upstream: true }, snoozedUntil: null };
@@ -52,11 +49,4 @@ test("the bell is off, on or snoozed", () => {
   assert.equal(describeBell(on, NOW), "Alerts on");
   assert.equal(describeBell({ ...on, enabled: false }, NOW), "Alerts off");
   assert.match(describeBell({ ...on, snoozedUntil: NOW + H }, NOW), /^Alerts snoozed until \d{2}:\d{2}$/);
-});
-
-test("bodies for the server", () => {
-  assert.deepEqual(toggleBody("app.example.com", true), { hosts: { "app.example.com": { enabled: true } } });
-  assert.deepEqual(kindBody("app.example.com", "host", false), { hosts: { "app.example.com": { kinds: { host: false } } } });
-  assert.deepEqual(snoozeBody("app.example.com", 60), { hosts: { "app.example.com": { snoozeMinutes: 60 } } });
-  assert.deepEqual(snoozeBody("app.example.com", null), { hosts: { "app.example.com": { snoozeMinutes: null } } });
 });

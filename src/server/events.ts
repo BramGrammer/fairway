@@ -3,10 +3,10 @@
  * History views read it and Alerts are sent from it (see ADR 0006).
  */
 
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { readFile } from "node:fs/promises";
 import { DEFAULT_POLICY, type AlertPolicy } from "./alert-policy.js";
 import type { AlertPayload, AlertSender } from "./alerts.js";
+import { isNumber, isRecord, writeJsonAtomic } from "./json-file.js";
 
 export type StateName = "ok" | "warning" | "down";
 export type EventKind = "state" | "gap" | "removed" | "flapping" | "deploy_failed" | "external_edit" | "rollback";
@@ -37,15 +37,10 @@ export interface TimelineInterval {
 }
 
 /**
- * How long a State must hold before it counts. For Caddy and upstreams the Owner can change it, see
- * `AlertPolicy`; the other two are fixed. `host` is the synthetic check: two failures in a row at its 5 minute interval.
+ * How long a State must hold before it counts. Caddy's and an upstream's are the Owner's to change, see `AlertPolicy`;
+ * these two are fixed. `host` is the synthetic check: two failures in a row at its 5 minute interval.
  */
-export const DEBOUNCE_MS: Record<SubjectKind, number> = {
-  caddy: 15_000,
-  upstream: 60_000,
-  cert: 0,
-  host: 240_000,
-};
+const FIXED_HOLD_MS = { cert: 0, host: 240_000 };
 
 export const RETENTION_MS = 30 * 24 * 3_600_000;
 export const MAX_EVENTS = 2000;
@@ -104,8 +99,6 @@ function withHosts(subject: string, message: string, hosts: string[] | undefined
 }
 
 const severity: Record<StateName, number> = { ok: 0, warning: 1, down: 2 };
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
-const isNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 const isState = (value: unknown): value is StateName => value === "ok" || value === "warning" || value === "down";
 const KINDS: EventKind[] = ["state", "gap", "removed", "flapping", "deploy_failed", "external_edit", "rollback"];
 
@@ -127,6 +120,9 @@ function validSubject(value: unknown): value is [string, SubjectState] {
 /** Decides, per Subject, whether an Alert may be sent for it, and which hosts it would be about. */
 export type AlertScope = (subject: string, now: number) => { send: boolean; hosts?: string[] };
 
+/** What an Alert is about; whatever is left out shows as null in the message. */
+type AlertBase = Pick<AlertPayload, "event" | "message"> & Partial<Pick<AlertPayload, "subject" | "state" | "previous">> & { since: number };
+
 export interface EventTrackerOptions {
   /** `events.json`; without it nothing is persisted. */
   file?: string;
@@ -147,6 +143,8 @@ export class EventTracker {
   private subjects = new Map<string, SubjectState>();
   private pending = new Map<string, { state: StateName; since: number; detail?: string }>();
   private nextId = 1;
+  /** The latest time any event covers, which retention counts back from. */
+  private newest = 0;
   private lastBeat: number | null = null;
   private deliveries = new Set<Promise<void>>();
   private saveTimer: NodeJS.Timeout | null = null;
@@ -175,15 +173,16 @@ export class EventTracker {
     return subjectKind(subject) === "caddy" ? this.policy.triggers.caddy : true;
   }
 
+  /** Whether an Alert may go out for this Subject, and which hosts it would be about. */
+  private allowed(subject: string, now: number): { send: boolean; hosts?: string[] } {
+    return this.sends(subject) ? (this.scope?.(subject, now) ?? { send: true }) : { send: false };
+  }
+
   private holdMs(subject: string): number {
-    switch (subjectKind(subject)) {
-      case "caddy":
-        return this.policy.caddyHoldSec * 1000;
-      case "upstream":
-        return this.policy.upstreamHoldSec * 1000;
-      default:
-        return DEBOUNCE_MS[subjectKind(subject)];
-    }
+    const kind = subjectKind(subject);
+    if (kind === "caddy") return this.policy.caddyHoldSec * 1000;
+    if (kind === "upstream") return this.policy.upstreamHoldSec * 1000;
+    return FIXED_HOLD_MS[kind];
   }
 
   /** Periodic saving; the final save happens through the shutdown hook. */
@@ -248,7 +247,7 @@ export class EventTracker {
   /** A one-shot occurrence. Whether it sends an Alert is up to the Owner; by default a rollback does not. */
   record(kind: "deploy_failed" | "external_edit" | "rollback", message: string, now = this.clock()): EventRecord {
     const event = this.add({ at: now, kind, message });
-    if (this.policy.triggers[kind]) this.alert(event, { event: kind, subject: null, state: null, previous: null, since: now, message });
+    if (this.policy.triggers[kind]) this.alert(event, { event: kind, since: now, message });
     return event;
   }
 
@@ -256,7 +255,7 @@ export class EventTracker {
   async sendTest(now = this.clock(), sender: AlertSender | null = this.sender): Promise<{ ok: true } | { ok: false; error: string }> {
     if (!sender) return { ok: false, error: "No ntfy topic is configured." };
     try {
-      await sender.send(this.payload({ event: "test", subject: null, state: null, previous: null, since: now, message: "Test alert from Fairway" }, true), { retry: false });
+      await sender.send(this.payload({ event: "test", since: now, message: "Test alert from Fairway" }, true), { retry: false });
       return { ok: true };
     } catch (error) {
       return { ok: false, error: (error as Error).message };
@@ -267,8 +266,12 @@ export class EventTracker {
 
   /** Newest first. */
   list(options: { subject?: string; limit?: number } = {}): EventRecord[] {
-    const matching = options.subject === undefined ? this.events : this.events.filter((event) => event.subject === options.subject);
-    return matching.toReversed().slice(0, options.limit ?? 200);
+    const limit = options.limit ?? 200;
+    const found: EventRecord[] = [];
+    for (let i = this.events.length - 1; i >= 0 && found.length < limit; i--) {
+      if (options.subject === undefined || this.events[i].subject === options.subject) found.push(this.events[i]);
+    }
+    return found;
   }
 
   stateOf(subject: string): StateName | null {
@@ -355,10 +358,7 @@ export class EventTracker {
       subjects: [...this.subjects],
       events: this.events,
     };
-    await mkdir(dirname(this.file), { recursive: true });
-    const tmp = `${this.file}.tmp`;
-    await writeFile(tmp, JSON.stringify(data));
-    await rename(tmp, this.file);
+    await writeJsonAtomic(this.file, data);
   }
 
   // ---- internals ----
@@ -366,16 +366,21 @@ export class EventTracker {
   private add(event: Omit<EventRecord, "id">): EventRecord {
     const record: EventRecord = { id: this.nextId++, ...event };
     this.events.push(record);
-    this.prune();
+    this.newest = Math.max(this.newest, record.until ?? record.at);
+    // Events arrive in time order, so the oldest one is the first to expire; only then is a full pass worth it.
+    if (this.events.length > MAX_EVENTS || this.expired(this.events[0])) this.prune();
     return record;
   }
 
   /** Retention is counted back from the newest event, so a long quiet spell does not empty the log. */
   private prune(): void {
-    const newest = this.events.reduce((latest, event) => Math.max(latest, event.until ?? event.at), 0);
-    const keepFrom = newest - RETENTION_MS;
-    this.events = this.events.filter((event) => (event.until ?? event.at) >= keepFrom);
+    this.newest = this.events.reduce((latest, event) => Math.max(latest, event.until ?? event.at), 0);
+    this.events = this.events.filter((event) => !this.expired(event));
     if (this.events.length > MAX_EVENTS) this.events = this.events.slice(-MAX_EVENTS);
+  }
+
+  private expired(event: EventRecord): boolean {
+    return (event.until ?? event.at) < this.newest - RETENTION_MS;
   }
 
   private commit(subject: string, state: StateName, at: number, detail: string | undefined, now: number): void {
@@ -387,7 +392,7 @@ export class EventTracker {
 
     if (state === "ok" && previous === null) return; // the first sighting of a healthy Subject is not news
     if (!this.sends(subject)) return;
-    const scope = this.scope?.(subject, now) ?? { send: true };
+    const scope = this.allowed(subject, now);
     if (!scope.send) return;
     if (current.muted) return;
 
@@ -409,25 +414,27 @@ export class EventTracker {
     current.muted = false;
     const message = `${describe(subject, current.state, null)} (settled)`;
     const event = this.add({ at: now, kind: "flapping", subject, state: current.state, message });
-    if (this.policy.triggers.flapping && this.sends(subject) && (this.scope?.(subject, now) ?? { send: true }).send) {
+    if (this.policy.triggers.flapping && this.allowed(subject, now).send) {
       this.alert(event, { event: "flapping", subject, state: current.state, previous: null, since: current.since, message });
     }
   }
 
-  private payload(base: Omit<AlertPayload, "since" | "link"> & { since: number }, test = false): AlertPayload {
+  private payload(base: AlertBase, test = false): AlertPayload {
     return {
+      subject: null,
+      state: null,
+      previous: null,
       ...base,
       since: new Date(base.since).toISOString(),
       ...(this.publicUrl && { link: this.publicUrl }),
       ...(test && { test: true }),
-    } as AlertPayload;
+    };
   }
 
-  private alert(event: EventRecord, base: Omit<AlertPayload, "since" | "link"> & { since: number }): void {
+  private alert(event: EventRecord, base: AlertBase): void {
     if (!this.sender) return;
     event.delivery = "pending";
-    const sender = this.sender;
-    const delivery = sender
+    const delivery = this.sender
       .send(this.payload(base))
       .then(() => {
         event.delivery = "sent";
