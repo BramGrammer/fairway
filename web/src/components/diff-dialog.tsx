@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 
 import { DiffView } from "@/components/diff-view"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Dialog,
   DialogContent,
@@ -39,9 +40,9 @@ export function DiffDialog({
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        <div className="max-h-[50vh] overflow-auto rounded-lg border">
+        <ScrollArea horizontal className="max-h-[50vh] rounded-lg border">
           <DiffView original={original} modified={modified} />
-        </div>
+        </ScrollArea>
         {children}
         <DialogFooter>{footer}</DialogFooter>
       </DialogContent>

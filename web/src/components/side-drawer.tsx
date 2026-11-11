@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNo
 import { XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
 import { clampDrawerWidth, DRAWER_STORAGE_KEY, parseStoredWidth } from "@/lib/route-drawer"
 
@@ -116,7 +117,9 @@ export function SideDrawer({ label, title, actions, tabs, flush = false, onClose
         </div>
       </div>
       {tabs}
-      <div className={cn("min-h-0 flex-1 overflow-auto", !flush && "px-5 py-4")}>{children}</div>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className={cn(!flush && "px-5 py-4")}>{children}</div>
+      </ScrollArea>
     </section>
   )
 }

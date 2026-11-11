@@ -14,6 +14,7 @@ import { DataTable } from "@/components/data-table/data-table"
 import { DataTableViewOptions } from "@/components/data-table/view-options"
 import { DefinitionPopover, DetailText } from "@/components/definition-popover"
 import { Badge } from "@/components/ui/badge"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { Chip, Site } from "@/lib/api"
 import {
@@ -194,20 +195,22 @@ function MiddlewareCell({ row, editorText }: { row: RouteRow; editorText: string
       host={row.host}
       editorText={editorText}
       fallback={
-        <div className="flex max-h-64 flex-col gap-2 overflow-auto">
-          {row.siteMiddleware.length > 0 && (
-            <section className="flex flex-col gap-1">
-              <h4 className="text-xs font-medium text-muted-foreground">Site-wide</h4>
-              <ChipList chips={row.siteMiddleware} />
-            </section>
-          )}
-          {own.length > 0 && (
-            <section className="flex flex-col gap-1">
-              <h4 className="text-xs font-medium text-muted-foreground">This route</h4>
-              <ChipList chips={own} />
-            </section>
-          )}
-        </div>
+        <ScrollArea autoHide className="max-h-64">
+          <div className="flex flex-col gap-2">
+            {row.siteMiddleware.length > 0 && (
+              <section className="flex flex-col gap-1">
+                <h4 className="text-xs font-medium text-muted-foreground">Site-wide</h4>
+                <ChipList chips={row.siteMiddleware} />
+              </section>
+            )}
+            {own.length > 0 && (
+              <section className="flex flex-col gap-1">
+                <h4 className="text-xs font-medium text-muted-foreground">This route</h4>
+                <ChipList chips={own} />
+              </section>
+            )}
+          </div>
+        </ScrollArea>
       }
     >
       <Badge variant="outline">{count}</Badge>

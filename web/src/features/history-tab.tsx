@@ -215,9 +215,9 @@ export function HistoryTab({ dirty, onLoadIntoEditor, onRolledBack }: HistoryTab
                 Roll back to this
               </Button>
             </TopBar>
-            <div className="min-h-0 flex-1 overflow-auto">
+            <ScrollArea horizontal className="min-h-0 flex-1">
               <DiffView original={live.text} modified={selected.text} />
-            </div>
+            </ScrollArea>
           </div>
         ) : (
           <Empty className="h-full">
