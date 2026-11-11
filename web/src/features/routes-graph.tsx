@@ -17,6 +17,8 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Separator } from "@/components/ui/separator"
+import { ToolbarAction } from "@/components/toolbar-action"
 import { Toggle } from "@/components/ui/toggle"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -578,6 +580,11 @@ const quiet = (percent: number) => `color-mix(in oklab, var(--muted-foreground) 
 
 const edgeWidth = (count: number) => clamp(1.25 + Math.sqrt(count) * 1.1, 1.25, 9)
 
+/** A thin vertical line between the groups of a toolbar row. */
+function Divider() {
+  return <Separator orientation="vertical" className="mx-1 data-vertical:h-6 data-vertical:self-auto" />
+}
+
 export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: string }) {
   const raw = useMemo(() => buildRaw(sites), [sites])
   const base = useMemo(() => arrange(raw, raw.paths), [raw])
@@ -987,10 +994,14 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2">
-        <Button variant="ghost" size="sm" onClick={toggleAll} disabled={allGroups.length === 0}>
-          {allOpen ? <ChevronsDownUpIcon data-icon="inline-start" /> : <ChevronsUpDownIcon data-icon="inline-start" />}
-          {allOpen ? "Collapse all" : "Expand all"}
-        </Button>
+        <ToolbarAction
+          label={allOpen ? "Collapse all" : "Expand all"}
+          onClick={toggleAll}
+          disabled={allGroups.length === 0}
+        >
+          {allOpen ? <ChevronsDownUpIcon /> : <ChevronsUpDownIcon />}
+        </ToolbarAction>
+        <Divider />
         <ToggleGroup
           variant="outline"
           spacing={0}
@@ -1007,6 +1018,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
         </ToggleGroup>
         {live && (
           <>
+            <Divider />
             <ToggleGroup
               variant="outline"
               spacing={0}
@@ -1020,6 +1032,7 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
                 </ToggleGroupItem>
               ))}
             </ToggleGroup>
+            <Divider />
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <span className="size-1.5 animate-pulse rounded-full bg-primary" />
               Live · {fmtRate(Object.values(live.hosts).reduce((sum, h) => sum + h.rate, 0))} ·{" "}
