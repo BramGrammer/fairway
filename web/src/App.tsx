@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react"
 import {
   ActivityIcon,
   CircleAlertIcon,
-  CircleCheckIcon,
   FileCodeIcon,
   HistoryIcon,
   RouteIcon,
@@ -12,7 +11,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
   Empty,
@@ -43,6 +42,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { FairwayLogo } from "@/components/fairway-logo"
 import { TopBarSlotProvider, TopBarTitleSlotProvider } from "@/components/top-bar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
 import { onShowInEditor } from "@/lib/show-in-editor"
 import { EditorTab } from "@/features/editor-tab"
 import { EventsTab } from "@/features/events-tab"
@@ -90,37 +90,52 @@ function useStatus() {
   return status
 }
 
-function StatusBadges({ status }: { status: StatusInfo | null }) {
-  if (!status) return null
+/** A dot for Caddy's state: green while it is reachable, a pulsing red when it is not. */
+function StatusDot({ status, className }: { status: StatusInfo | null; className?: string }) {
+  if (status === null) return null
+  const label = status.caddyReachable ? "Caddy connected" : "Caddy unreachable"
   return (
-    <div className="flex flex-col items-start gap-1.5 px-2 group-data-[collapsible=icon]:items-center group-data-[collapsible=icon]:px-0">
-      {status.auth.mode === "none" && (
-        <Tooltip>
-          <TooltipTrigger render={<Badge variant="destructive" />}>
-            <ShieldAlertIcon data-icon="inline-start" />
-            <span className="group-data-[collapsible=icon]:hidden">No authentication</span>
-          </TooltipTrigger>
-          <TooltipContent side="right">
-            No authentication. Anyone who can reach this page can change your proxy. Fairway is meant for an internal network: restrict access at the network layer.
-          </TooltipContent>
-        </Tooltip>
-      )}
+    <Tooltip>
+      {/* The pseudo element widens the area that shows the tooltip beyond the small dot. */}
+      <TooltipTrigger
+        render={<span role="status" className={cn("relative flex size-2 shrink-0 after:absolute after:-inset-1.5", className)} />}
+      >
+        <span className="sr-only">{label}</span>
+        {!status.caddyReachable && (
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-destructive/60" />
+        )}
+        <span
+          className={cn("relative inline-flex size-full rounded-full", status.caddyReachable ? "bg-success" : "bg-destructive")}
+        />
+      </TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
+  )
+}
+
+/** Shown only when login is off. A full alert while the sidebar is open, an icon with a tooltip while it is collapsed. */
+function NoAuthAlert() {
+  return (
+    <>
+      <Alert variant="destructive" className="group-data-[collapsible=icon]:hidden">
+        <ShieldAlertIcon />
+        <AlertTitle>No authentication</AlertTitle>
+        <AlertDescription className="text-xs">
+          Anyone who can reach this page can change your proxy. Restrict access at the network layer.
+        </AlertDescription>
+      </Alert>
       <Tooltip>
-        <TooltipTrigger render={<Badge variant={status.caddyReachable ? "secondary" : "destructive"} />}>
-          {status.caddyReachable ? (
-            <CircleCheckIcon data-icon="inline-start" />
-          ) : (
-            <CircleAlertIcon data-icon="inline-start" />
-          )}
-          <span className="group-data-[collapsible=icon]:hidden">
-            {status.caddyReachable ? "Caddy connected" : "Caddy unreachable"}
-          </span>
+        <TooltipTrigger
+          render={<div className="hidden items-center justify-center text-destructive group-data-[collapsible=icon]:flex" />}
+        >
+          <ShieldAlertIcon className="size-4" aria-label="No authentication" />
         </TooltipTrigger>
         <TooltipContent side="right">
-          {status.caddyReachable ? "Caddy connected" : "Caddy unreachable"}
+          No authentication. Anyone who can reach this page can change your proxy.
         </TooltipContent>
       </Tooltip>
-    </div>
+      <Separator />
+    </>
   )
 }
 
@@ -145,9 +160,19 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
       <Sidebar collapsible="icon" variant="inset">
         <SidebarHeader>
           <div className="flex items-center gap-2 p-1">
-            <FairwayLogo className="size-8 shrink-0 text-primary" />
+            <div className="relative shrink-0">
+              <FairwayLogo className="size-8 text-primary" />
+              {/* The name is hidden while the sidebar is collapsed, so the dot moves onto the logo then. */}
+              <StatusDot
+                status={status}
+                className="absolute top-0 -right-0.5 hidden size-2.5 rounded-full ring-2 ring-sidebar group-data-[collapsible=icon]:flex"
+              />
+            </div>
             <div className="flex min-w-0 flex-col leading-tight group-data-[collapsible=icon]:hidden">
-              <span className="truncate font-heading font-semibold">Fairway</span>
+              <span className="flex items-center gap-1.5 font-heading font-semibold">
+                <span className="truncate">Fairway</span>
+                <StatusDot status={status} />
+              </span>
               <span className="truncate text-xs text-muted-foreground">Caddy control</span>
             </div>
           </div>
@@ -179,7 +204,7 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
         </SidebarContent>
 
         <SidebarFooter>
-          <StatusBadges status={status} />
+          {status?.auth.mode === "none" && <NoAuthAlert />}
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton tooltip="Settings" onClick={() => setSettingsOpen(true)}>
