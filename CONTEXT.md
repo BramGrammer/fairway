@@ -16,6 +16,9 @@ Caddy's own control interface, used by Fairway to validate and reload a Caddyfil
 **Validation**:
 Checking that a Caddyfile is acceptable to Caddy without applying it. Always happens before a save or reload.
 
+**Finding**:
+A message about a Caddyfile that Validation or Fairway's own rules produce, with a level (error or warning) and, when known, the line it belongs to. Caddy's own errors and warnings and Fairway's rules are all Findings. A Finding never stops a Reload by itself; only Caddy refusing the Caddyfile does.
+
 **Reload**:
 Making Caddy run a new Caddyfile in place, with no dropped connections.
 
@@ -69,6 +72,7 @@ Reloading an earlier Revision as the live Caddyfile.
 
 ## Relationships
 
+- Validating a Caddyfile gives zero or more Findings; the Owner must confirm a Reload that has warnings.
 - A Caddyfile is validated, then reloaded; a successful reload creates a Revision.
 - A Site has one or more Rules; each Rule has Middleware and leads to one or more Destinations.
 - A Subject has one State at a time; each change of State is an Event, and some Events cause an Alert.

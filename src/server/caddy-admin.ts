@@ -7,7 +7,7 @@ export interface Warning {
   message: string;
 }
 
-export type AdaptResult = { ok: true; warnings: Warning[] } | { ok: false; error: string };
+export type AdaptResult = { ok: true; warnings: Warning[]; /** The adapted JSON config (`result` of the reply). */ config: unknown } | { ok: false; error: string };
 export type LoadResult = { ok: true } | { ok: false; error: string };
 export type ServersResult = { ok: true; servers: Record<string, unknown> } | { ok: false; error: string };
 
@@ -66,8 +66,8 @@ export class CaddyAdmin {
     try {
       const reply = await this.send("POST", "/adapt", caddyfile);
       if (reply.status === 200) {
-        const parsed = JSON.parse(reply.body) as { warnings?: Warning[] };
-        return { ok: true, warnings: parsed.warnings ?? [] };
+        const parsed = JSON.parse(reply.body) as { warnings?: Warning[]; result?: unknown };
+        return { ok: true, warnings: parsed.warnings ?? [], config: parsed.result ?? {} };
       }
       return { ok: false, error: errorMessage(reply) };
     } catch (error) {

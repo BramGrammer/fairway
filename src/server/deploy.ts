@@ -1,6 +1,8 @@
-import { CaddyAdmin, type Warning } from "./caddy-admin.js";
+import { CaddyAdmin } from "./caddy-admin.js";
 import { hashText, readCaddyfile, writeInPlace } from "./caddyfile.js";
+import { runRules } from "./rules.js";
 import type { EventTracker } from "./events.js";
+import { errorFinding, warningFinding, type Finding, type ValidateResult } from "./findings.js";
 import type { RevisionMeta, Store } from "./store.js";
 
 export type DeployFailure =
@@ -29,11 +31,13 @@ export interface DeployResult {
   revision: RevisionMeta;
   /** The text matched the latest Revision, so no new one was recorded. */
   unchanged: boolean;
-  warnings: Warning[];
+  findings: Finding[];
 }
 
 export class Deployer {
   private queue: Promise<unknown> = Promise.resolve();
+  /** Fairway's own rules; replaceable so a test can make them fail. */
+  rules: (config: unknown, text: string) => Finding[] = runRules;
 
   constructor(
     private readonly caddyfilePath: string,
@@ -53,9 +57,18 @@ export class Deployer {
     return readCaddyfile(this.caddyfilePath);
   }
 
-  async validate(text: string) {
-    if (text.trim() === "") return { ok: false as const, error: "The Caddyfile is empty." };
-    return this.admin.adapt(text);
+  /** Everything Caddy has to say about the text, as Findings. */
+  async validate(text: string): Promise<ValidateResult> {
+    if (text.trim() === "") return { ok: false, findings: [errorFinding("The Caddyfile is empty.")] };
+    const adapted = await this.admin.adapt(text);
+    if (!adapted.ok) return { ok: false, findings: [errorFinding(adapted.error)] };
+    const findings = adapted.warnings.map(warningFinding);
+    try {
+      findings.push(...this.rules(adapted.config, text));
+    } catch {
+      // A broken rule must never break Validation; Caddy's own answer still stands.
+    }
+    return { ok: true, findings };
   }
 
   /** Validate, back up, write, reload. One at a time, restoring the old file if the reload fails. */
@@ -78,7 +91,9 @@ export class Deployer {
     }
 
     const checked = await this.validate(request.text);
-    if (!checked.ok) throw new DeployError({ code: "invalid", message: checked.error });
+    if (!checked.ok) {
+      throw new DeployError({ code: "invalid", message: checked.findings.map((f) => (f.line ? `Line ${f.line}: ${f.message}` : f.message)).join("\n") });
+    }
 
     if (previous.hash !== request.baseHash) {
       await this.keepExternalEdit(previous);
@@ -106,7 +121,7 @@ export class Deployer {
     const latest = this.store.latestDeployed();
     const hash = hashText(request.text);
     if (latest?.hash === hash) {
-      return { revision: latest, unchanged: true, warnings: checked.warnings };
+      return { revision: latest, unchanged: true, findings: checked.findings };
     }
     const revision = await this.store.add(request.text, {
       hash,
@@ -114,7 +129,7 @@ export class Deployer {
       note: request.note?.trim() ?? "",
       ...(request.rollbackOf !== undefined && { rollbackOf: request.rollbackOf }),
     });
-    return { revision, unchanged: false, warnings: checked.warnings };
+    return { revision, unchanged: false, findings: checked.findings };
   }
 
   /** An edit made outside the editor is snapshotted before it gets overwritten, so it is never lost. */
