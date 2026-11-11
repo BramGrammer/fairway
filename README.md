@@ -102,12 +102,20 @@ Fairway watches these **Subjects** and keeps a history of their **State** (ok, w
 
 A State changes only after it has held for a while: about 15 seconds for Caddy and one minute for an upstream. A short blip never shows. The route drawer shows a timeline strip per host, the routes table a compact one, and the Events tab lists everything. A stretch in which Fairway was not running shows as unknown, never as down.
 
-Set `NTFY_URL` to the full address of an [ntfy](https://ntfy.sh) topic (for example `https://ntfy.example.test/fairway`) to get a push message when something changes. Several topics can be separated by commas. If the topic needs a login, set `NTFY_TOKEN` as well. Fairway POSTs the message text with a title, a priority (high for something down or a refused Deploy) and an emoji tag.
+Alerts are push messages through [ntfy](https://ntfy.sh). Set `NTFY_URL` to the full address of a topic (for example `https://ntfy.example.test/fairway`; several can be separated by commas) and, if the topic needs a login, `NTFY_TOKEN`. Fairway POSTs the message text with a title, a priority (high for something down or a refused Deploy) and an emoji tag.
+
+These variables are the defaults. **Settings › Alerts** changes them without a restart and keeps your changes in `alert-settings.json` in `DATA_DIR`, where they win until you reset them:
+
+- **Topics:** add more, each with its own token, switch each on or off and send a test to one. Topics from the environment can be switched off but not edited or removed. Addresses and tokens are never shown again after you save them.
+- **What sends an Alert:** a switch for each kind of Subject, for a refused Deploy, an outside edit, a Rollback (off by default), for recovery messages and for the flapping message.
+- **Timing:** how long Caddy and upstreams must fail before they count as down, and the flapping limits.
+- **Public address:** `PUBLIC_URL` is its default.
+- Adding, changing or removing a topic address or token needs login (see [Login](#login)); without it only the switches, the timing and switching topics on or off can be changed. Anyone who can reach an open Fairway could otherwise point its requests anywhere.
 
 - Sent for: a Certificate turning amber or red, an upstream or Caddy going down, the recovery of each, a Deploy that Caddy refused, and a Caddyfile that was changed outside Fairway. A Rollback only appears in the history.
 - Each bad State is sent once. A Subject that changes State more than 4 times in an hour sends one `flapping` message and is held until it has been stable for 30 minutes.
 - A failed delivery is retried after 10 seconds, 1 minute and 5 minutes, then marked "not delivered" in the Events tab. Nothing is queued.
-- `PUBLIC_URL` makes each message open Fairway when tapped. The topic address and the token are never shown in the interface; use **Send test** in the Events tab to check them.
+- `PUBLIC_URL` makes each message open Fairway when tapped. The topic address and the token are never shown in the interface; use **Send test** (in Settings or the Events tab) to check them.
 - With `HOST_CHECK=1` (and `TLS_PROBE_ADDR`), Fairway also requests `/` of each probed host every 5 minutes through Caddy and counts a connection error, a timeout of 10 seconds, or a 502, 503 or 504 as down (two in a row). Other statuses count as up. This catches an app that fails behind a proxy with no health check. It sends real requests to your hosts, so it is off by default. See [ADR 0006](docs/adr/0006-events-and-alerts-from-one-log.md).
 
 ## Login
@@ -125,7 +133,7 @@ Fairway has one **Owner**. Set `AUTH_USER` and either `AUTH_PASSWORD` or `AUTH_P
 | --- | --- | --- |
 | `ADMIN_SOCKET` | `/run/caddy-admin/admin.sock` | Caddy admin API socket |
 | `CADDYFILE_PATH` | `/caddyfile/Caddyfile` | The mounted Caddyfile |
-| `DATA_DIR` | `/data` | Original, Revisions, the login secret, the traffic history (`metrics.json`) and the event history (`events.json`). Mount it as a volume to keep them across restarts |
+| `DATA_DIR` | `/data` | Original, Revisions, the login secret, the traffic history (`metrics.json`) and the event history (`events.json`) and the alert settings you changed (`alert-settings.json`). Mount it as a volume to keep them across restarts |
 | `LOG_DIR`, `LOG_FILE` | `/var/log/caddy`, `access.log` | Where Caddy writes its JSON log. The TLS tab's last issuance error needs Caddy's default logger (not only access logs) to write here. |
 | `MAX_REVISIONS` | `50` | Deployed Revisions kept |
 | `AUTH_USER`, `AUTH_PASSWORD` | unset | The Owner's login, see [Login](#login). Both, or neither |

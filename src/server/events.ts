@@ -5,6 +5,7 @@
 
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { DEFAULT_POLICY, type AlertPolicy } from "./alert-policy.js";
 import type { AlertPayload, AlertSender } from "./alerts.js";
 
 export type StateName = "ok" | "warning" | "down";
@@ -36,8 +37,8 @@ export interface TimelineInterval {
 }
 
 /**
- * How long a State must hold before it counts. One place so a settings screen can take it over later.
- * `host` is the synthetic check: two failures in a row at its 5 minute interval.
+ * How long a State must hold before it counts. For Caddy and upstreams the Owner can change it, see
+ * `AlertPolicy`; the other two are fixed. `host` is the synthetic check: two failures in a row at its 5 minute interval.
  */
 export const DEBOUNCE_MS: Record<SubjectKind, number> = {
   caddy: 15_000,
@@ -49,9 +50,7 @@ export const DEBOUNCE_MS: Record<SubjectKind, number> = {
 export const RETENTION_MS = 30 * 24 * 3_600_000;
 export const MAX_EVENTS = 2000;
 /** More than this many State changes of one Subject within `FLAP_WINDOW_MS` count as flapping. */
-export const FLAP_CHANGES = 4;
 export const FLAP_WINDOW_MS = 3_600_000;
-export const FLAP_STABLE_MS = 30 * 60_000;
 /** A silence longer than this between two checks is recorded as a Gap. */
 export const GAP_MS = 120_000;
 const SAVE_MS = 60_000;
@@ -129,8 +128,9 @@ export interface EventTrackerOptions {
 
 export class EventTracker {
   private readonly file?: string;
-  private readonly sender: AlertSender | null;
-  private readonly publicUrl: string | null;
+  private sender: AlertSender | null;
+  private publicUrl: string | null;
+  private policy: AlertPolicy = DEFAULT_POLICY;
   private readonly clock: () => number;
   private events: EventRecord[] = [];
   private subjects = new Map<string, SubjectState>();
@@ -149,6 +149,24 @@ export class EventTracker {
 
   get alertsEnabled(): boolean {
     return this.sender !== null;
+  }
+
+  /** Changes where Alerts go, what sends one and how long things must hold, with effect from the next reading. */
+  configure(settings: { sender?: AlertSender | null; publicUrl?: string | null; policy?: AlertPolicy }): void {
+    if (settings.sender !== undefined) this.sender = settings.sender;
+    if (settings.publicUrl !== undefined) this.publicUrl = settings.publicUrl;
+    if (settings.policy) this.policy = settings.policy;
+  }
+
+  private holdMs(subject: string): number {
+    switch (subjectKind(subject)) {
+      case "caddy":
+        return this.policy.caddyHoldSec * 1000;
+      case "upstream":
+        return this.policy.upstreamHoldSec * 1000;
+      default:
+        return DEBOUNCE_MS[subjectKind(subject)];
+    }
   }
 
   /** Periodic saving; the final save happens through the shutdown hook. */
@@ -190,7 +208,7 @@ export class EventTracker {
         candidate = { state, since: now, ...(detail !== undefined && { detail }) };
         this.pending.set(subject, candidate);
       }
-      const settled = now - candidate.since >= DEBOUNCE_MS[subjectKind(subject)];
+      const settled = now - candidate.since >= this.holdMs(subject);
       if (settled || (!current && state === "ok")) {
         this.pending.delete(subject);
         this.commit(subject, state, candidate.since, detail, now);
@@ -210,18 +228,18 @@ export class EventTracker {
     }
   }
 
-  /** A one-shot occurrence. A failed deploy and an outside edit send an Alert; a rollback does not. */
+  /** A one-shot occurrence. Whether it sends an Alert is up to the Owner; by default a rollback does not. */
   record(kind: "deploy_failed" | "external_edit" | "rollback", message: string, now = this.clock()): EventRecord {
     const event = this.add({ at: now, kind, message });
-    if (kind !== "rollback") this.alert(event, { event: kind, subject: null, state: null, previous: null, since: now, message });
+    if (this.policy.triggers[kind]) this.alert(event, { event: kind, subject: null, state: null, previous: null, since: now, message });
     return event;
   }
 
   /** Sends a clearly marked fake Alert and says whether it arrived. Nothing is recorded. */
-  async sendTest(now = this.clock()): Promise<{ ok: true } | { ok: false; error: string }> {
-    if (!this.sender) return { ok: false, error: "No ntfy topic is configured." };
+  async sendTest(now = this.clock(), sender: AlertSender | null = this.sender): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!sender) return { ok: false, error: "No ntfy topic is configured." };
     try {
-      await this.sender.send(this.payload({ event: "test", subject: null, state: null, previous: null, since: now, message: "Test alert from Fairway" }, true), { retry: false });
+      await sender.send(this.payload({ event: "test", subject: null, state: null, previous: null, since: now, message: "Test alert from Fairway" }, true), { retry: false });
       return { ok: true };
     } catch (error) {
       return { ok: false, error: (error as Error).message };
@@ -351,26 +369,30 @@ export class EventTracker {
     this.subjects.set(subject, current);
 
     if (state === "ok" && previous === null) return; // the first sighting of a healthy Subject is not news
+    if (!this.policy.triggers[subjectKind(subject)]) return;
     if (current.muted) return;
 
     const changes = this.events.filter((e) => e.kind === "state" && e.subject === subject && e.previous !== null && e.at > now - FLAP_WINDOW_MS).length;
-    if (changes > FLAP_CHANGES) {
+    if (changes > this.policy.flapChanges) {
       current.muted = true;
       const flap = this.add({ at: now, kind: "flapping", subject, state, message: `${subjectName(subject)} keeps changing State; alerts are held until it settles` });
-      this.alert(flap, { event: "flapping", subject, state, previous, since: now, message: flap.message });
+      if (this.policy.triggers.flapping) this.alert(flap, { event: "flapping", subject, state, previous, since: now, message: flap.message });
       return;
     }
+    if (state === "ok" && !this.policy.triggers.recovery) return;
     this.alert(event, { event: "state", subject, state, previous, since: at, message });
   }
 
   /** A flapping Subject that has been stable for a while is announced once and un-muted. */
   private releaseIfStable(subject: string, now: number): void {
     const current = this.subjects.get(subject);
-    if (!current?.muted || now - current.since < FLAP_STABLE_MS) return;
+    if (!current?.muted || now - current.since < this.policy.flapStableMin * 60_000) return;
     current.muted = false;
     const message = `${describe(subject, current.state, null)} (settled)`;
     const event = this.add({ at: now, kind: "flapping", subject, state: current.state, message });
-    this.alert(event, { event: "flapping", subject, state: current.state, previous: null, since: current.since, message });
+    if (this.policy.triggers.flapping && this.policy.triggers[subjectKind(subject)]) {
+      this.alert(event, { event: "flapping", subject, state: current.state, previous: null, since: current.since, message });
+    }
   }
 
   private payload(base: Omit<AlertPayload, "since" | "link"> & { since: number }, test = false): AlertPayload {

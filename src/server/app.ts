@@ -3,7 +3,8 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { join } from "node:path";
 import { createAuth, parseTrustProxy } from "./auth.js";
-import { NtfySender, parseNtfyUrls } from "./alerts.js";
+import { AlertSettings, type Patch, type TopicPatch } from "./alert-settings.js";
+import { parseNtfyUrls } from "./alerts.js";
 import { CaddyAdmin } from "./caddy-admin.js";
 import type { Config } from "./config.js";
 import { DeployError, Deployer } from "./deploy.js";
@@ -32,11 +33,19 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
   await metrics.load();
   metrics.start();
   onShutdown.push(() => metrics.save());
-  const events = new EventTracker({
-    file: join(config.dataDir, "events.json"),
-    sender: parseNtfyUrls(config.ntfyUrl).length > 0 ? new NtfySender(parseNtfyUrls(config.ntfyUrl), { token: config.ntfyToken }) : null,
-    publicUrl: config.publicUrl,
-  });
+  // The environment gives the alert settings their defaults; what the Owner changes in the interface wins.
+  const alertSettings = new AlertSettings(
+    { ntfyUrls: parseNtfyUrls(config.ntfyUrl), ntfyToken: config.ntfyToken, publicUrl: config.publicUrl },
+    join(config.dataDir, "alert-settings.json"),
+  );
+  await alertSettings.load();
+  const events = new EventTracker({ file: join(config.dataDir, "events.json") });
+  const applyAlertSettings = () => {
+    const { publicUrl, policy } = alertSettings.effective();
+    events.configure({ sender: alertSettings.sender(), publicUrl, policy });
+  };
+  applyAlertSettings();
+  alertSettings.onChange(applyAlertSettings);
   await events.load();
   events.start();
   onShutdown.push(() => events.save());
@@ -216,9 +225,54 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
 
   // Whether alerting is on, never where it goes.
   app.get("/api/alerts", (c) => c.json({ ok: true, enabled: events.alertsEnabled }));
+  // With a topic id it tests just that topic, even when it is switched off.
   app.post("/api/alerts/test", async (c) => {
+    const { id } = await c.req.json<{ id?: unknown }>().catch(() => ({ id: undefined }));
+    if (typeof id === "string") {
+      const sender = alertSettings.senderFor(id);
+      if (!sender) return c.json({ ok: false, error: "No such topic." }, 404);
+      const result = await events.sendTest(undefined, sender);
+      return c.json(result, result.ok ? 200 : 502);
+    }
     const result = await events.sendTest();
     return c.json(result, result.ok ? 200 : 502);
+  });
+
+  // The alert settings. Topic addresses and tokens can be written but never read back, and with no login
+  // they cannot be written either: anyone who can reach the page could send Alerts, and Fairway's requests, anywhere.
+  const needsLogin = () => ({ ok: false as const, error: "Sign in is required to change where Alerts go. Set AUTH_USER and a password first." });
+  const settingsView = () => ({ ok: true as const, canEditSecrets: auth.enabled, ...alertSettings.view(auth.enabled) });
+  const answer = (result: { ok: boolean }) => (result.ok ? 200 : 400);
+
+  app.get("/api/settings/alerts", (c) => c.json(settingsView()));
+
+  app.put("/api/settings/alerts", async (c) => {
+    const body = await c.req.json<Patch>().catch(() => null);
+    if (!body || typeof body !== "object") return c.json({ ok: false, error: "Send a JSON object." }, 400);
+    const result = await alertSettings.patch({ triggers: body.triggers, timing: body.timing, publicUrl: body.publicUrl });
+    return result.ok ? c.json(settingsView()) : c.json(result, answer(result));
+  });
+
+  app.post("/api/settings/alerts/topics", async (c) => {
+    if (!auth.enabled) return c.json(needsLogin(), 403);
+    const body = await c.req.json<{ name: string; url: string; token?: string | null }>().catch(() => null);
+    if (!body || typeof body !== "object") return c.json({ ok: false, error: "Send a JSON object." }, 400);
+    const result = await alertSettings.addTopic(body);
+    return result.ok ? c.json({ ...settingsView(), id: result.id }) : c.json(result, answer(result));
+  });
+
+  app.patch("/api/settings/alerts/topics/:id", async (c) => {
+    const body = await c.req.json<TopicPatch>().catch(() => null);
+    if (!body || typeof body !== "object") return c.json({ ok: false, error: "Send a JSON object." }, 400);
+    if (!auth.enabled && (body.url !== undefined || body.token !== undefined)) return c.json(needsLogin(), 403);
+    const result = await alertSettings.updateTopic(c.req.param("id"), { name: body.name, url: body.url, token: body.token, enabled: body.enabled });
+    return result.ok ? c.json(settingsView()) : c.json(result, result.error === "No such topic." ? 404 : 400);
+  });
+
+  app.delete("/api/settings/alerts/topics/:id", async (c) => {
+    if (!auth.enabled) return c.json(needsLogin(), 403);
+    const result = await alertSettings.removeTopic(c.req.param("id"));
+    return result.ok ? c.json(settingsView()) : c.json(result, result.error === "No such topic." ? 404 : 400);
   });
 
   app.get("/api/tls/status", (c) => c.json(sweep.snapshot()));

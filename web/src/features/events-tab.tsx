@@ -89,7 +89,7 @@ function AlertLine({ enabled }: { enabled: boolean | null }) {
       </span>
       {!enabled && (
         <span className="text-muted-foreground">
-          Set <code className="font-mono text-xs">NTFY_URL</code> in the environment and restart to get alerts.
+          Add a topic under Settings › Alerts, or set <code className="font-mono text-xs">NTFY_URL</code>.
         </span>
       )}
       <Button variant="outline" size="sm" onClick={send} disabled={testing || !enabled} className="ml-auto">

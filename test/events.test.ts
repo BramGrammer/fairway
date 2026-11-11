@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { NtfySender, ntfyLook, parseNtfyUrls, type AlertPayload, type AlertSender } from "../src/server/alerts.js";
-import { EventTracker, FLAP_STABLE_MS, MAX_EVENTS, RETENTION_MS } from "../src/server/events.js";
+import { DEFAULT_POLICY, type AlertPolicy } from "../src/server/alert-policy.js";
+import { EventTracker, MAX_EVENTS, RETENTION_MS } from "../src/server/events.js";
 
 const MIN = 60_000;
 const T0 = Date.UTC(2026, 0, 1);
@@ -165,7 +166,7 @@ test("a flapping Subject sends one flapping Alert, is held, then announced once 
   // changes 1-4 alert, the fifth is the flapping Alert, the rest are held
   assert.deepEqual(sent.map((p) => p.event), ["state", "state", "state", "state", "flapping"]);
 
-  const settledAt = T0 + 8 * MIN + FLAP_STABLE_MS;
+  const settledAt = T0 + 8 * MIN + 30 * MIN;
   t.observe("cert:a.test", "ok", undefined, settledAt - MIN);
   assert.equal(sent.length, 5);
   t.observe("cert:a.test", "ok", undefined, settledAt);
@@ -259,6 +260,104 @@ test("an Alert that was still pending when Fairway stopped shows as failed after
   const b = new EventTracker({ file, now: () => T0 });
   await b.load();
   assert.equal(b.list()[0].delivery, "failed");
+});
+
+// ---- the Owner's policy ----
+
+const policy = (over: Partial<AlertPolicy> & { triggers?: Partial<AlertPolicy["triggers"]> } = {}): AlertPolicy => ({
+  ...DEFAULT_POLICY,
+  ...over,
+  triggers: { ...DEFAULT_POLICY.triggers, ...over.triggers },
+});
+
+test("a kind of Subject switched off is recorded but never alerted", async () => {
+  const { sent, sender } = fakeSender();
+  const t = new EventTracker({ sender });
+  t.configure({ policy: policy({ triggers: { cert: false } }) });
+  t.observe("cert:a.test", "ok", undefined, T0);
+  t.observe("cert:a.test", "down", "expired", T0 + MIN);
+  t.observe("caddy", "ok", undefined, T0);
+  t.observe("caddy", "down", undefined, T0 + MIN);
+  t.observe("caddy", "down", undefined, T0 + 2 * MIN);
+  await t.flush();
+  assert.equal(t.stateOf("cert:a.test"), "down");
+  assert.deepEqual(sent.map((p) => p.subject), ["caddy"]);
+});
+
+test("with recovery messages off only the bad States are sent", async () => {
+  const { sent, sender } = fakeSender();
+  const t = new EventTracker({ sender });
+  t.configure({ policy: policy({ triggers: { recovery: false } }) });
+  t.observe("cert:a.test", "ok", undefined, T0);
+  t.observe("cert:a.test", "down", undefined, T0 + MIN);
+  t.observe("cert:a.test", "ok", undefined, T0 + 2 * MIN);
+  await t.flush();
+  assert.deepEqual(sent.map((p) => p.state), ["down"]);
+  assert.equal(t.stateOf("cert:a.test"), "ok");
+});
+
+test("a rollback alerts only when the Owner switched it on; a refused deploy can be switched off", async () => {
+  const { sent, sender } = fakeSender();
+  const t = new EventTracker({ sender });
+  t.configure({ policy: policy({ triggers: { rollback: true, deploy_failed: false } }) });
+  t.record("rollback", "r", T0);
+  t.record("deploy_failed", "d", T0 + MIN);
+  await t.flush();
+  assert.deepEqual(sent.map((p) => p.event), ["rollback"]);
+});
+
+test("the hold times of Caddy and upstreams are the Owner's", () => {
+  const t = new EventTracker();
+  t.configure({ policy: policy({ caddyHoldSec: 60, upstreamHoldSec: 10 }) });
+  t.observe("caddy", "ok", undefined, T0);
+  t.observe("caddy", "down", undefined, T0 + 1_000);
+  t.observe("caddy", "down", undefined, T0 + 30_000);
+  assert.equal(t.stateOf("caddy"), "ok"); // 60 s is needed now
+  t.observe("caddy", "down", undefined, T0 + 61_000);
+  assert.equal(t.stateOf("caddy"), "down");
+
+  t.observe("upstream:a:80", "ok", undefined, T0);
+  t.observe("upstream:a:80", "down", undefined, T0 + 1_000);
+  t.observe("upstream:a:80", "down", undefined, T0 + 11_000);
+  assert.equal(t.stateOf("upstream:a:80"), "down");
+});
+
+test("the flapping limits are the Owner's, and the flapping message can be switched off without ending the hold", async () => {
+  const { sent, sender } = fakeSender();
+  const t = new EventTracker({ sender });
+  t.configure({ policy: policy({ flapChanges: 2, flapStableMin: 5, triggers: { flapping: false } }) });
+  t.observe("cert:a.test", "ok", undefined, T0);
+  for (let i = 1; i <= 5; i++) t.observe("cert:a.test", i % 2 ? "down" : "ok", undefined, T0 + i * MIN);
+  await t.flush();
+  assert.deepEqual(sent.map((p) => p.event), ["state", "state"]); // third change is held, and nothing announces it
+  t.observe("cert:a.test", "ok", undefined, T0 + 11 * MIN);
+  t.observe("cert:a.test", "ok", undefined, T0 + 17 * MIN); // stable for 5 minutes: released, but not announced
+  await t.flush();
+  assert.equal(sent.length, 2);
+  t.observe("cert:a.test", "down", undefined, T0 + 90 * MIN); // the hour has passed and it is un-muted: alerts again
+  await t.flush();
+  assert.equal(sent.length, 3);
+});
+
+test("a new sender and public address apply from the next Alert", async () => {
+  const a = fakeSender();
+  const b = fakeSender();
+  const t = new EventTracker({ sender: a.sender });
+  t.record("deploy_failed", "one", T0);
+  t.configure({ sender: b.sender, publicUrl: "https://fairway.example.test" });
+  t.record("deploy_failed", "two", T0 + MIN);
+  t.configure({ sender: null });
+  assert.equal(t.alertsEnabled, false);
+  await t.flush();
+  assert.equal(a.sent.length, 1);
+  assert.equal(b.sent.length, 1);
+  assert.equal(b.sent[0].link, "https://fairway.example.test");
+});
+
+test("a test can go to one given sender, even when none is configured", async () => {
+  const one = fakeSender();
+  assert.deepEqual(await new EventTracker().sendTest(T0, one.sender), { ok: true });
+  assert.equal(one.sent[0].test, true);
 });
 
 // ---- the ntfy sender ----

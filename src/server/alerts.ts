@@ -25,8 +25,11 @@ export interface AlertSender {
 export const RETRY_DELAYS_MS = [10_000, 60_000, 300_000];
 const TIMEOUT_MS = 10_000;
 
+/** A topic address, or one with its own access token. */
+export type NtfyTarget = string | { url: string; token?: string | null };
+
 export interface NtfyOptions {
-  /** Access token for a topic that needs a login. */
+  /** Access token for topics given as plain addresses, when they need a login. */
   token?: string | null;
   fetchFn?: typeof fetch;
   sleep?: (ms: number) => Promise<void>;
@@ -58,17 +61,17 @@ export function ntfyLook(payload: AlertPayload): Look {
 }
 
 export class NtfySender implements AlertSender {
-  private readonly urls: string[];
-  private readonly token: string | null;
+  private readonly targets: Array<{ url: string; token: string | null }>;
   private readonly fetchFn: typeof fetch;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly delays: number[];
   private readonly timeoutMs: number;
 
-  /** `urls` are full topic addresses, for example `https://ntfy.example.test/fairway`. */
-  constructor(urls: string[], options: NtfyOptions = {}) {
-    this.urls = urls;
-    this.token = options.token || null;
+  /** Targets are full topic addresses, for example `https://ntfy.example.test/fairway`. */
+  constructor(targets: NtfyTarget[], options: NtfyOptions = {}) {
+    this.targets = targets.map((target) =>
+      typeof target === "string" ? { url: target, token: options.token || null } : { url: target.url, token: target.token || null },
+    );
     this.fetchFn = options.fetchFn ?? fetch;
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms).unref()));
     this.delays = options.delays ?? RETRY_DELAYS_MS;
@@ -76,12 +79,12 @@ export class NtfySender implements AlertSender {
   }
 
   async send(payload: AlertPayload, options: { retry?: boolean } = {}): Promise<void> {
-    const results = await Promise.allSettled(this.urls.map((url) => this.sendTo(url, payload, options.retry === false ? [] : this.delays)));
+    const results = await Promise.allSettled(this.targets.map((target) => this.sendTo(target, payload, options.retry === false ? [] : this.delays)));
     const failed = results.find((result) => result.status === "rejected");
     if (failed) throw (failed as PromiseRejectedResult).reason;
   }
 
-  private async sendTo(url: string, payload: AlertPayload, delays: number[]): Promise<void> {
+  private async sendTo({ url, token }: { url: string; token: string | null }, payload: AlertPayload, delays: number[]): Promise<void> {
     const look = ntfyLook(payload);
     const headers: Record<string, string> = {
       "Content-Type": "text/plain; charset=utf-8",
@@ -89,7 +92,7 @@ export class NtfySender implements AlertSender {
       Priority: look.priority,
       Tags: look.tags,
       ...(payload.link && { Click: payload.link }),
-      ...(this.token && { Authorization: `Bearer ${this.token}` }),
+      ...(token && { Authorization: `Bearer ${token}` }),
     };
     let failure = "";
     for (let attempt = 0; attempt <= delays.length; attempt++) {

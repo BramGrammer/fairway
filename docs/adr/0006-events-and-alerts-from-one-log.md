@@ -10,7 +10,7 @@ Fairway records every change of a Subject's State, and a few one-shot occurrence
 
 ## Consequences
 
-- Alerts are push messages to ntfy, set with `NTFY_URL` (one topic address, or several separated by commas) and an optional `NTFY_TOKEN`. Settings come from the environment, as in [ADR 0005](0005-single-owner-login-from-the-environment.md), and neither value is ever returned by the API.
+- Alerts are push messages to ntfy, set with `NTFY_URL` (one topic address, or several separated by commas) and an optional `NTFY_TOKEN`, and neither value is ever returned by the API. The environment is the base; [ADR 0007](0007-alert-settings-from-the-interface-over-the-environment.md) adds changing these from Settings.
 - A State only changes after it has held long enough (about 15 s for Caddy, 1 minute for an upstream, none for a Certificate). The values are fixed in one place so a settings screen can take them over later.
 - Delivery is retried three times (about 10 s, 1 minute, 5 minutes) and then the Event is marked "not delivered". Nothing is queued: a "down" message arriving two days late is worse than none.
 - Upstreams have only ok and down. Caddy reports health only for active health checks, and the passive `fails` counter depends on settings the Owner may not use, so it is not turned into a warning. A synthetic check of each host fills the gap for hosts without a health check.

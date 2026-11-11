@@ -1,17 +1,16 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import {
   BellIcon,
-  BellOffIcon,
   MonitorIcon,
   MoonIcon,
   PaletteIcon,
-  SendIcon,
   ShieldAlertIcon,
   ShieldCheckIcon,
   SunIcon,
   type LucideIcon,
 } from "lucide-react"
 
+import { AlertSettingsPanel } from "@/features/alert-settings-panel"
 import { useTheme } from "@/components/theme-provider"
 import {
   Breadcrumb,
@@ -34,18 +33,14 @@ import {
   SidebarMenuItem,
   SidebarProvider,
 } from "@/components/ui/sidebar"
-import { Spinner } from "@/components/ui/spinner"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { useAlertTest } from "@/hooks/use-alert-test"
-import { api } from "@/lib/api"
 import { PRESSED } from "@/lib/toggle-styles"
-import { cn } from "@/lib/utils"
 
 export type SettingsCategory = "appearance" | "alerts" | "access"
 
 const CATEGORIES: Array<{ id: SettingsCategory; label: string; icon: LucideIcon; description: string }> = [
   { id: "appearance", label: "Appearance", icon: PaletteIcon, description: "How Fairway looks in this browser." },
-  { id: "alerts", label: "Alerts", icon: BellIcon, description: "Push messages when something turns bad." },
+  { id: "alerts", label: "Alerts", icon: BellIcon, description: "Where Alerts go, and what sends one." },
   { id: "access", label: "Access", icon: ShieldCheckIcon, description: "Who can use this Fairway." },
 ]
 
@@ -78,69 +73,6 @@ function AppearanceSettings() {
         <FieldDescription>System follows your operating system and switches with it. Stored in this browser only.</FieldDescription>
       </FieldGroup>
     </FieldSet>
-  )
-}
-
-function AlertSettings() {
-  const [enabled, setEnabled] = useState<boolean | null>(null)
-  const [failed, setFailed] = useState(false)
-  const { testing, result, send } = useAlertTest()
-
-  useEffect(() => {
-    let stopped = false
-    api<{ ok: boolean; enabled: boolean }>("/api/alerts", undefined, { background: true })
-      .then(({ body }) => {
-        if (!stopped) setEnabled(body.enabled)
-      })
-      .catch(() => {
-        if (!stopped) setFailed(true)
-      })
-    return () => {
-      stopped = true
-    }
-  }, [])
-
-  return (
-    <div className="flex flex-col gap-6">
-      <FieldSet>
-        <FieldLegend>Push messages</FieldLegend>
-        <FieldGroup>
-          <div className="flex items-start gap-3 rounded-lg border p-3">
-            {enabled ? (
-              <BellIcon className="mt-0.5 size-4 shrink-0 text-success" />
-            ) : (
-              <BellOffIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-            )}
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
-              <span className="text-sm font-medium">
-                {failed ? "Cannot reach the editor server" : enabled === null ? "Checking…" : enabled ? "Alerts are on" : "Alerts are off"}
-              </span>
-              <span className="text-sm text-muted-foreground">
-                {enabled === false ? (
-                  <>
-                    Set <code className="font-mono text-xs">NTFY_URL</code> in the environment and restart Fairway. The history is kept either way.
-                  </>
-                ) : (
-                  "Fairway sends a message through ntfy when a Certificate turns amber or red, an upstream or Caddy goes down or recovers, a Deploy is refused, or the Caddyfile is changed outside Fairway."
-                )}
-              </span>
-            </div>
-            <Button variant="outline" size="sm" onClick={send} disabled={testing || !enabled}>
-              {testing ? <Spinner data-icon="inline-start" /> : <SendIcon data-icon="inline-start" />}
-              Send test
-            </Button>
-          </div>
-          {result && (
-            <p role="status" className={cn("text-xs", result.ok ? "text-success" : "text-destructive")}>
-              {result.ok ? "Test alert sent." : `Test failed: ${result.error}`}
-            </p>
-          )}
-          <FieldDescription>
-            The topic address and token come from the environment and are never shown here.
-          </FieldDescription>
-        </FieldGroup>
-      </FieldSet>
-    </div>
   )
 }
 
@@ -261,7 +193,7 @@ export function SettingsDialog({
                 </div>
 
                 {active === "appearance" && <AppearanceSettings />}
-                {active === "alerts" && <AlertSettings />}
+                {active === "alerts" && <AlertSettingsPanel />}
                 {active === "access" && <AccessSettings user={user} />}
               </div>
             </ScrollArea>
