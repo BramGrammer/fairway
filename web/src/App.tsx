@@ -5,16 +5,13 @@ import {
   CircleCheckIcon,
   FileCodeIcon,
   HistoryIcon,
-  MoonIcon,
   RouteIcon,
   ScrollTextIcon,
   SettingsIcon,
   ShieldAlertIcon,
-  SunIcon,
   type LucideIcon,
 } from "lucide-react"
 
-import { useTheme } from "@/components/theme-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -54,7 +51,6 @@ import { LogsTab } from "@/features/logs-tab"
 import { RoutesTab } from "@/features/routes-tab"
 import { SettingsDialog } from "@/features/settings-dialog"
 import { useCaddyfile } from "@/hooks/use-caddyfile"
-import { useIsDark } from "@/hooks/use-is-dark"
 import { LoginView } from "@/components/login-form"
 import { UserMenu } from "@/components/user-menu"
 import { api, onSessionLost, type StatusInfo } from "@/lib/api"
@@ -128,22 +124,6 @@ function StatusBadges({ status }: { status: StatusInfo | null }) {
   )
 }
 
-function ThemeMenuItem() {
-  const { setTheme } = useTheme()
-  const dark = useIsDark()
-  return (
-    <SidebarMenuItem>
-      <SidebarMenuButton
-        tooltip={dark ? "Light mode" : "Dark mode"}
-        onClick={() => setTheme(dark ? "light" : "dark")}
-      >
-        {dark ? <SunIcon /> : <MoonIcon />}
-        <span>{dark ? "Light mode" : "Dark mode"}</span>
-      </SidebarMenuButton>
-    </SidebarMenuItem>
-  )
-}
-
 function Editor({ user, onLogout }: { user: string | null; onLogout: () => void }) {
   const [view, setView] = useState<View>(initialView)
   const [topBarSlot, setTopBarSlot] = useState<HTMLElement | null>(null)
@@ -201,7 +181,6 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
         <SidebarFooter>
           <StatusBadges status={status} />
           <SidebarMenu>
-            <ThemeMenuItem />
             <SidebarMenuItem>
               <SidebarMenuButton tooltip="Settings" onClick={() => setSettingsOpen(true)}>
                 <SettingsIcon />
