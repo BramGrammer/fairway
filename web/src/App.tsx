@@ -44,7 +44,7 @@ import {
 } from "@/components/ui/sidebar"
 import { Skeleton } from "@/components/ui/skeleton"
 import { FairwayLogo } from "@/components/fairway-logo"
-import { TopBarSlotProvider } from "@/components/top-bar"
+import { TopBarSlotProvider, TopBarTitleSlotProvider } from "@/components/top-bar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { onShowInEditor } from "@/lib/show-in-editor"
 import { EditorTab } from "@/features/editor-tab"
@@ -147,6 +147,7 @@ function ThemeMenuItem() {
 function Editor({ user, onLogout }: { user: string | null; onLogout: () => void }) {
   const [view, setView] = useState<View>(initialView)
   const [topBarSlot, setTopBarSlot] = useState<HTMLElement | null>(null)
+  const [titleSlot, setTitleSlot] = useState<HTMLElement | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const caddyfile = useCaddyfile()
   const status = useStatus()
@@ -215,10 +216,12 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
 
       <SidebarInset className="h-svh min-w-0 overflow-hidden md:h-[calc(100svh-1rem)]">
         <TopBarSlotProvider value={topBarSlot}>
+        <TopBarTitleSlotProvider value={titleSlot}>
         <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
           <h1 className="font-heading font-medium">{current.label}</h1>
+          <div ref={setTitleSlot} className="flex shrink-0 items-center gap-2" />
           <div ref={setTopBarSlot} className="ml-auto flex min-w-0 items-center gap-2 overflow-x-auto" />
         </header>
 
@@ -282,6 +285,7 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
         <div hidden={view !== "logs"} className="min-h-0 flex-1">
           <LogsTab active={view === "logs"} />
         </div>
+        </TopBarTitleSlotProvider>
         </TopBarSlotProvider>
       </SidebarInset>
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} user={user} />

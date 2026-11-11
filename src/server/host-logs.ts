@@ -65,7 +65,7 @@ export function bareHost(host: string): string {
 }
 
 /** The logger a host's requests are written to, or null when they are not logged at all. */
-function resolveLogger(servers: unknown, host: string): string | null {
+export function resolveLogger(servers: unknown, host: string): string | null {
   const want = bareHost(host);
   let fallback: string | null = null;
   let skipped = false;

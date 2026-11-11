@@ -10,3 +10,13 @@ export function TopBar({ children }: { children: ReactNode }) {
   const slot = useContext(TopBarSlot)
   return slot ? createPortal(children, slot) : null
 }
+
+const TopBarTitleSlot = createContext<HTMLElement | null>(null)
+
+export const TopBarTitleSlotProvider = TopBarTitleSlot.Provider
+
+/** Renders its children right after the page's title, for a status that belongs to the page itself. */
+export function TopBarTitle({ children }: { children: ReactNode }) {
+  const slot = useContext(TopBarTitleSlot)
+  return slot ? createPortal(children, slot) : null
+}

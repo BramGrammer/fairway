@@ -1,3 +1,4 @@
+import type { Finding } from "@/lib/findings"
 import { isSessionLost, type AuthStatus } from "@/lib/auth"
 
 export interface Reply<T = unknown> {
@@ -49,12 +50,6 @@ export function openStream(url: string): EventSource {
   return source
 }
 
-export interface Warning {
-  file?: string
-  line?: number
-  message: string
-}
-
 export type RevisionId = number | "original"
 
 export interface RevisionMeta {
@@ -73,9 +68,11 @@ export interface StatusInfo {
 
 export type { AuthStatus }
 
-export type ValidateResult =
-  | { ok: true; warnings: Warning[] }
-  | { ok: false; error: string }
+/** Caddy rejected the Caddyfile when `ok` is false; Deploy refuses then. */
+export interface ValidateResult {
+  ok: boolean
+  findings: Finding[]
+}
 
 export type FormatResult =
   | { ok: true; text: string; changed: boolean }
@@ -117,7 +114,7 @@ export type DeployResult =
       revision: RevisionMeta
       unchanged: boolean
       hash: string
-      warnings: Warning[]
+      findings: Finding[]
     }
   | {
       ok: false

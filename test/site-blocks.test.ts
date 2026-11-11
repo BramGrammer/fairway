@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { findSiteBlocks } from "../web/src/lib/site-blocks.js";
+import { findSiteBlocks as findSiteBlocksOnServer } from "../src/server/site-blocks.js";
 
 const slice = (text: string, host: string) =>
   findSiteBlocks(text, host).map((m) => text.slice(m.from, m.to));
@@ -70,5 +71,14 @@ describe("findSiteBlocks", () => {
   it("handles a block that is never closed", () => {
     const text = "example.com {\n\tencode gzip\n";
     assert.deepEqual(slice(text, "example.com"), [text.trimEnd()]);
+  });
+});
+
+describe("the server copy of findSiteBlocks", () => {
+  it("finds the same blocks as the web one, wildcard included", () => {
+    const text = ':8080 {\n}\n\n* {\n}\n\na.test, b.test {\n}\n\n(snip) {\n}\n';
+    for (const host of ["*", "a.test", "b.test", "c.test"]) {
+      assert.deepEqual(findSiteBlocksOnServer(text, host), findSiteBlocks(text, host), host);
+    }
   });
 });
