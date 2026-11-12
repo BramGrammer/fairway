@@ -70,6 +70,21 @@ The Caddyfile exactly as it was before Fairway first changed it. Always kept, ne
 **Rollback**:
 Reloading an earlier Revision as the live Caddyfile.
 
+**Assistant**:
+The AI chat beside the editor. It answers questions about the Caddyfile and offers Proposals; it never reloads.
+
+**Conversation**:
+One chat with the Assistant, kept for a limited time. It can be continued later; the Assistant always works from what is in the editor now, not from what it was when the Conversation began.
+
+**Proposal**:
+A changed Caddyfile the Assistant offers, shown as a difference against what is in the editor. The Owner accepts or rejects it; accepting only changes the editor.
+
+**Review**:
+One scheduled read of the Access logs by an AI model, looking for requests that deserve the Owner's attention, such as probing or scanning.
+
+**Observation**:
+One notable thing a Review reports. Distinct from a Finding, which is about a Caddyfile.
+
 ## Relationships
 
 - Validating a Caddyfile gives zero or more Findings; the Owner must confirm a Reload that has warnings.
@@ -78,3 +93,6 @@ Reloading an earlier Revision as the live Caddyfile.
 - A Subject has one State at a time; each change of State is an Event, and some Events cause an Alert.
 - Events that are not State changes (a failed deploy, an outside edit) have no recovery.
 - Fairway never holds an invalid Caddyfile as the live one.
+- An accepted Proposal goes through Validation and Reload like any other edit.
+- A Review gives zero or more Observations, each with a level (info, notable or urgent). A Review with an Observation at or above the level the Owner chose records one Event.
+- A Review never changes the Caddyfile.
