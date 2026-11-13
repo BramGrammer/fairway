@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/BramGrammer/fairway/compare/v0.5.0...v0.6.0) (2026-11-13)
+
+
+### Features
+
+* an Assistant, scheduled Reviews and model settings ([9500d4c](https://github.com/BramGrammer/fairway/commit/9500d4c8153af23bad57631225b779652d06b5be))
+* an Assistant, scheduled Reviews and model settings ([d4bdb7c](https://github.com/BramGrammer/fairway/commit/d4bdb7c0c284684886fb5657a7f0789f33cb1503))
+
 ## [0.5.0](https://github.com/BramGrammer/fairway/compare/v0.4.0...v0.5.0) (2026-11-11)
 
 
