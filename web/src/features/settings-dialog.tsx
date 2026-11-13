@@ -1,7 +1,8 @@
 import { useState } from "react"
 import type { SettingsCategory } from "@/lib/router"
-import { ActivityIcon, BellIcon, SettingsIcon, ShieldAlertIcon, ShieldCheckIcon, type LucideIcon } from "lucide-react"
+import { ActivityIcon, BellIcon, SparklesIcon, SettingsIcon, ShieldAlertIcon, ShieldCheckIcon, type LucideIcon } from "lucide-react"
 
+import { AiSettingsPanel } from "@/features/ai-settings-panel"
 import { AlertSettingsPanel } from "@/features/alert-settings-panel"
 import { GeneralSettings } from "@/features/general-settings"
 import { MonitoringSettings } from "@/features/monitoring-settings"
@@ -36,6 +37,7 @@ const CATEGORIES: Array<{ id: SettingsCategory; label: string; icon: LucideIcon;
   { id: "general", label: "General", icon: SettingsIcon, description: "This Fairway and this browser." },
   { id: "monitoring", label: "Monitoring", icon: ActivityIcon, description: "When Caddy or an upstream counts as down." },
   { id: "alerts", label: "Alerts", icon: BellIcon, description: "Where messages go, and what sends one." },
+  { id: "ai", label: "AI", icon: SparklesIcon, description: "The model endpoint the Assistant and Reviews will use." },
   { id: "access", label: "Access", icon: ShieldCheckIcon, description: "Who can use this Fairway." },
 ]
 
@@ -53,6 +55,7 @@ function CategoryPanel({ active, user }: { active: SettingsCategory; user: strin
   const { view, loadError, save } = actions
 
   if (active === "access") return <AccessSettings user={user} />
+  if (active === "ai") return <AiSettingsPanel />
   const failed = loadError && !view && (
     <div className="flex flex-col items-start gap-2">
       <ErrorLine message={loadError} />

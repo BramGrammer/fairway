@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   ActivityIcon,
+  ClipboardCheckIcon,
   CircleAlertIcon,
   FileCodeIcon,
   HistoryIcon,
@@ -8,6 +9,7 @@ import {
   ScrollTextIcon,
   SettingsIcon,
   ShieldAlertIcon,
+  SparklesIcon,
   type LucideIcon,
 } from "lucide-react"
 
@@ -43,18 +45,25 @@ import { FairwayLogo } from "@/components/fairway-logo"
 import { TopBarSlotProvider, TopBarTitleSlotProvider } from "@/components/top-bar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { onAskAssistant, requestAssistant } from "@/lib/ask-assistant"
 import { onShowInEditor } from "@/lib/show-in-editor"
+import { AssistantPanel } from "@/features/assistant-panel"
 import { EditorTab } from "@/features/editor-tab"
 import { EventsTab } from "@/features/events-tab"
 import { HistoryTab } from "@/features/history-tab"
 import { LogsTab } from "@/features/logs-tab"
+import { ReviewsTab } from "@/features/reviews-tab"
 import { RoutesTab } from "@/features/routes-tab"
 import { SettingsDialog } from "@/features/settings-dialog"
+import { useAssistant } from "@/hooks/use-assistant"
 import { useCaddyfile } from "@/hooks/use-caddyfile"
+import { ToolbarDivider, ToolbarToggle } from "@/components/toolbar-action"
 import { LoginView } from "@/components/login-form"
 import { UserMenu } from "@/components/user-menu"
 import { api, onSessionLost, type StatusInfo } from "@/lib/api"
 import { LoginRequiredContext } from "@/lib/login-context"
+import { reviewsAvailable } from "@/lib/reviews"
+import type { AiPrice, AiSettingsReply } from "@/lib/ai-settings"
 import { RouterProvider } from "@/components/router-provider"
 import { useRouter } from "@/hooks/use-router"
 import { pageTitle, type Page } from "@/lib/router"
@@ -65,6 +74,7 @@ const NAV: { id: Page; label: string; icon: LucideIcon }[] = [
   { id: "routes", label: "Routes", icon: RouteIcon },
   { id: "history", label: "History", icon: HistoryIcon },
   { id: "events", label: "Events", icon: ActivityIcon },
+  { id: "reviews", label: "Reviews", icon: ClipboardCheckIcon },
   { id: "logs", label: "Logs", icon: ScrollTextIcon },
 ]
 
@@ -84,6 +94,32 @@ function useStatus() {
     return () => clearInterval(timer)
   }, [])
   return status
+}
+
+/** What the AI settings make available: the Reviews page and the Assistant each need their model and a login. Read again when Settings closes. */
+function useAiOffered(loginRequired: boolean, settingsOpen: boolean) {
+  const [ready, setReady] = useState<{ assistant: boolean; review: boolean } | null>(null)
+  const [price, setPrice] = useState<AiPrice | null>(null)
+  useEffect(() => {
+    if (settingsOpen) return
+    let stopped = false
+    api<AiSettingsReply>("/api/settings/ai", undefined, { background: true })
+      .then(({ body }) => {
+        if (stopped) return
+        setReady(body.ok ? body.ready : { assistant: false, review: false })
+        setPrice(body.ok ? body.assistantPrice : null)
+      })
+      .catch(() => {})
+    return () => {
+      stopped = true
+    }
+  }, [settingsOpen])
+  return {
+    reviews: reviewsAvailable(ready?.review ?? false, loginRequired),
+    assistant: loginRequired && (ready?.assistant ?? false),
+    known: ready !== null,
+    price,
+  }
 }
 
 /** A dot for Caddy's state: green while it is reachable, a pulsing red when it is not. */
@@ -141,8 +177,38 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
   const [titleSlot, setTitleSlot] = useState<HTMLElement | null>(null)
   const caddyfile = useCaddyfile()
   const status = useStatus()
+  const loginRequired = user !== null
+  const { reviews: reviewsOffered, assistant: assistantOffered, known: reviewsKnown, price: assistantPrice } = useAiOffered(loginRequired, params.settings !== undefined)
+  const [assistantOpen, setAssistantOpen] = useState(false)
+  // The Assistant reads the editor buffer as it is when a turn is sent.
+  const textRef = useRef(caddyfile.text)
+  useEffect(() => {
+    textRef.current = caddyfile.text
+  }, [caddyfile.text])
+  const getText = useCallback(() => textRef.current, [])
+  // Held here, not in the panel, so closing the panel does not drop the Conversation.
+  const assistant = useAssistant(getText, caddyfile.text)
+  const nav = NAV.filter((item) => item.id !== "reviews" || reviewsOffered)
 
   useEffect(() => onShowInEditor(() => navigate("editor")), [navigate])
+
+  // A request from elsewhere in the app, such as a Review, to ask the Assistant: it opens on a new Conversation.
+  const { startWith } = assistant
+  useEffect(
+    () =>
+      assistantOffered
+        ? onAskAssistant((message) => {
+            setAssistantOpen(true)
+            void startWith(message)
+          })
+        : undefined,
+    [assistantOffered, startWith]
+  )
+
+  // A link to Reviews while they are not offered (no model, no login) goes to the editor.
+  useEffect(() => {
+    if (view === "reviews" && reviewsKnown && !reviewsOffered) navigate("editor")
+  }, [view, reviewsKnown, reviewsOffered, navigate])
 
   useEffect(() => {
     document.title = pageTitle(view)
@@ -178,7 +244,7 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
             <SidebarGroupLabel>Caddyfile</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {NAV.map((item) => (
+                {nav.map((item) => (
                   <SidebarMenuItem key={item.id}>
                     <SidebarMenuButton
                       isActive={view === item.id}
@@ -213,7 +279,7 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
         <SidebarRail />
       </Sidebar>
 
-      <SidebarInset className="h-svh min-w-0 overflow-hidden md:h-[calc(100svh-1rem)]">
+      <SidebarInset className={cn("h-svh min-w-0 overflow-hidden md:h-[calc(100svh-1rem)]", assistantOffered && assistantOpen && "md:peer-data-[variant=inset]:mr-0")}>
         <TopBarSlotProvider value={topBarSlot}>
         <TopBarTitleSlotProvider value={titleSlot}>
         <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
@@ -223,6 +289,14 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
           <div ref={setTitleSlot} className="flex shrink-0 items-center gap-2" />
           {/* The padding, undone by the negative margin, leaves room for the 1px a pressed button moves and for focus rings; without it they overflow and a scrollbar appears. */}
           <div ref={setTopBarSlot} className="-mr-1 -my-1 ml-auto flex min-w-0 items-center gap-2 overflow-x-auto p-1" />
+          {assistantOffered && (
+            <>
+              <ToolbarDivider />
+              <ToolbarToggle label="Assistant" pressed={assistantOpen} onPressedChange={setAssistantOpen}>
+                <SparklesIcon />
+              </ToolbarToggle>
+            </>
+          )}
         </header>
 
         <div hidden={view !== "editor"} className="min-h-0 flex-1">
@@ -276,6 +350,12 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
           </div>
         )}
 
+        {view === "reviews" && reviewsOffered && (
+          <div className="min-h-0 flex-1">
+            <ReviewsTab onAskAssistant={assistantOffered ? requestAssistant : undefined} />
+          </div>
+        )}
+
         {view === "events" && (
           <div className="min-h-0 flex-1">
             <EventsTab />
@@ -288,6 +368,17 @@ function Editor({ user, onLogout }: { user: string | null; onLogout: () => void 
         </TopBarTitleSlotProvider>
         </TopBarSlotProvider>
       </SidebarInset>
+      {assistantOffered && assistantOpen && (
+        <AssistantPanel
+          assistant={assistant}
+          price={assistantPrice}
+          onAccept={(text) => {
+            caddyfile.setText(text)
+            navigate("editor")
+          }}
+          onClose={() => setAssistantOpen(false)}
+        />
+      )}
       <SettingsDialog
         category={params.settings ?? null}
         onCategoryChange={(settings) => replaceParams({ settings })}

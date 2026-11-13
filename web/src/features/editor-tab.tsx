@@ -251,7 +251,9 @@ export function EditorTab({
             size="sm"
             className="ml-auto"
             aria-expanded={findingsOpen}
-            onClick={() => setFindingsOpen((open) => !open)}
+            onClick={() => {
+              setFindingsOpen((open) => !open)
+            }}
           >
             <PanelRightOpenIcon data-icon="inline-start" />
             Details

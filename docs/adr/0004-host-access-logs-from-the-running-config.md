@@ -13,7 +13,7 @@ The Caddyfile can send access logs to any number of files, so Fairway cannot be 
 - Only file writers can be read. stdout, stderr and network writers produce a stated reason, as does a host Caddy does not log.
 - A missing file cannot be told apart from a folder that is not mounted, because Fairway cannot see the path inside Caddy's container. The message names the file and the configured path.
 - Lines are matched on the host Caddy recorded (no port). Hosts that share a file only see their own lines.
-- Rotated files named by Caddy (name plus timestamp) are read when the current file has too few lines. Compressed rotations (`roll_gzip`) are not read.
+- Rotated files named by Caddy (name plus timestamp) are read when the current file has too few lines. Compressed rotations (`roll_gzip`, on by default in Caddy) are not read by the Logs tab; the digest for a Review reads them ([ADR 0009](0009-a-review-reads-a-local-digest.md)).
 - Fairway shows what Caddy wrote; redaction is Caddy's job. There is no login, so the tab warns that logs hold visitor addresses and paths.
 
 ## Considered

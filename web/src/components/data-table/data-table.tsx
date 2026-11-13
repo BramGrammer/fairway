@@ -6,13 +6,15 @@ interface DataTableProps<TData> {
   table: TanstackTable<TData>
   /** Shown when there are no rows. */
   empty?: string
+  /** Makes each row clickable, for opening its details. */
+  onRowClick?: (row: TData) => void
 }
 
 /**
  * Renders a TanStack table with the shadcn table parts. It draws the bare `<table>`
  * (not the `Table` wrapper) so the header can stick to the top of an outer scroll area.
  */
-export function DataTable<TData>({ table, empty = "No results." }: DataTableProps<TData>) {
+export function DataTable<TData>({ table, empty = "No results.", onRowClick }: DataTableProps<TData>) {
   const rows = table.getRowModel().rows
   return (
     <table data-slot="table" className="w-full caption-bottom text-sm">
@@ -30,7 +32,11 @@ export function DataTable<TData>({ table, empty = "No results." }: DataTableProp
       <TableBody>
         {rows.length > 0 ? (
           rows.map((row) => (
-            <TableRow key={row.id} className="group/row">
+            <TableRow
+              key={row.id}
+              className={onRowClick ? "group/row cursor-pointer" : "group/row"}
+              onClick={onRowClick && (() => onRowClick(row.original))}
+            >
               {row.getVisibleCells().map((cell) => (
                 <TableCell key={cell.id} className="h-10 py-0 whitespace-nowrap first:pl-4 last:pr-4">
                   {flexRender(cell.column.columnDef.cell, cell.getContext())}

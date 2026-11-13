@@ -6,12 +6,13 @@ import { Button } from "@/components/ui/button"
 import { FieldDescription, FieldGroup, FieldLegend, FieldSet } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { ErrorLine, ResetButton, TimingRow, type Save } from "@/features/settings-shared"
 import type { useAlertSettings, Outcome } from "@/hooks/use-alert-settings"
 import { useAlertTest } from "@/hooks/use-alert-test"
-import { TIMING_FIELDS, groupTriggers, topicBody, triggerBody, type AlertSettingsView, type PutBody, type TopicView } from "@/lib/alert-settings"
+import { REVIEW_LEVEL_HINT, REVIEW_LEVEL_OPTIONS, TIMING_FIELDS, groupTriggers, reviewLevelBody, topicBody, triggerBody, type ReviewLevel, type AlertSettingsView, type PutBody, type TopicView } from "@/lib/alert-settings"
 import { cn } from "@/lib/utils"
 
 /** Add or change a saved topic. The address and token are write-only: empty keeps what is stored. */
@@ -303,6 +304,35 @@ function Triggers({ view, save }: { view: AlertSettingsView; save: Save }) {
             </div>
           </div>
         ))}
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Reviews</span>
+          <div className="flex items-center gap-3 rounded-lg border px-3 py-2.5">
+            <div className="flex min-w-0 flex-1 flex-col">
+              <span className="text-sm">A Review finds something at or above</span>
+              <span className="text-xs text-muted-foreground">{REVIEW_LEVEL_HINT}</span>
+            </div>
+            {view.reviewLevel.overridden && (
+              <>
+                <Badge variant="outline">Changed</Badge>
+                <ResetButton onClick={() => run(reviewLevelBody(null))} />
+              </>
+            )}
+            <Select items={REVIEW_LEVEL_OPTIONS} value={view.reviewLevel.value} onValueChange={(value) => value && run(reviewLevelBody(value as ReviewLevel))}>
+              <SelectTrigger className="w-32" aria-label="Level at which a Review sends an Alert">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {REVIEW_LEVEL_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
         <ErrorLine message={error} />
       </FieldGroup>
     </FieldSet>

@@ -19,6 +19,16 @@ export interface Config {
   ntfyToken: string | null;
   /** Fairway's own address, used for the link in an Alert. */
   publicUrl: string | null;
+  /** Address of the OpenAI-compatible endpoint the Assistant and Reviews use; null means OpenRouter's. */
+  aiBaseUrl: string | null;
+  /** The key for that endpoint. Never sent back through the API. */
+  aiApiKey: string | null;
+  /** Default model for the Assistant; null means none chosen. */
+  aiAssistantModel: string | null;
+  /** Default model for Reviews; null means none chosen. */
+  aiReviewModel: string | null;
+  /** Default for how often a Review runs: off, 6h, 12h, 24h or weekly; null means 24h. */
+  aiReviewInterval: string | null;
   webRoot: string;
   /** The Owner's login. Neither set means Fairway runs open; a hash wins over a password. */
   authUser: string | null;
@@ -44,6 +54,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ntfyUrl: env.NTFY_URL?.trim() || null,
     ntfyToken: env.NTFY_TOKEN?.trim() || null,
     publicUrl: env.PUBLIC_URL?.trim() || null,
+    aiBaseUrl: env.AI_BASE_URL?.trim() || null,
+    aiApiKey: env.AI_API_KEY?.trim() || null,
+    aiAssistantModel: env.AI_ASSISTANT_MODEL?.trim() || null,
+    aiReviewModel: env.AI_REVIEW_MODEL?.trim() || null,
+    aiReviewInterval: env.AI_REVIEW_INTERVAL?.trim() || null,
     webRoot: env.WEB_ROOT ?? "dist/web",
     authUser: env.AUTH_USER || null,
     authPassword: env.AUTH_PASSWORD || null,

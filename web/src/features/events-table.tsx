@@ -12,6 +12,7 @@ import { ArrowRightIcon } from "lucide-react"
 import { DataTableColumnHeader } from "@/components/data-table/column-header"
 import { DataTable } from "@/components/data-table/data-table"
 import { DataTableViewOptions } from "@/components/data-table/view-options"
+import { useRouter } from "@/hooks/use-router"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { formatAge } from "@/lib/age"
@@ -83,6 +84,16 @@ function StatusCell({ event }: { event: EventRecord }) {
   )
 }
 
+/** A link to the Review an Event is about. */
+function ReviewLink({ id, children }: { id: number; children: React.ReactNode }) {
+  const { linkProps } = useRouter()
+  return (
+    <a className="text-xs underline-offset-2 hover:underline" {...linkProps("reviews", { review: String(id) })}>
+      {children}
+    </a>
+  )
+}
+
 /** The list of events as a data table: when, what kind, which one, and what changed. */
 export function EventsTable({ events, now, notice }: { events: EventRecord[]; now: number; notice?: string }) {
   const [initial] = useState(() => loadTableState(STORAGE_KEY, parsePersistedEvents))
@@ -120,7 +131,9 @@ export function EventsTable({ events, now, notice }: { events: EventRecord[]; no
         header: ({ column }) => <DataTableColumnHeader column={column} title={TITLES.name} />,
         cell: ({ row }) => {
           const name = eventName(row.original)
-          return name ? <span className="font-mono text-xs">{name}</span> : <span className="text-muted-foreground">–</span>
+          return row.original.review ? (
+            <ReviewLink id={row.original.review.id}>{name}</ReviewLink>
+          ) : name ? <span className="font-mono text-xs">{name}</span> : <span className="text-muted-foreground">–</span>
         },
       },
       {

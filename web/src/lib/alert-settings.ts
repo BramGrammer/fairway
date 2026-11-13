@@ -1,6 +1,7 @@
 /** The view of the alert settings the server returns, and the pure helpers around it. Copied, not imported, from the server. */
 
-export type TriggerKey = "caddy" | "deploy_failed" | "external_edit" | "rollback" | "recovery" | "flapping"
+export type TriggerKey = "caddy" | "deploy_failed" | "external_edit" | "review_failed" | "rollback" | "recovery" | "flapping"
+export type ReviewLevel = "info" | "notable" | "urgent" | "never"
 export type TimingKey = "caddyHoldSec" | "upstreamHoldSec" | "flapChanges" | "flapStableMin"
 
 export interface TopicView {
@@ -42,6 +43,8 @@ export interface AlertSettingsView {
   topics: TopicView[]
   publicUrl: { value: string | null; envDefault: string | null; overridden: boolean }
   triggers: Record<TriggerKey, { value: boolean; overridden: boolean }>
+  /** The lowest level of Observation that makes a Review send an Alert. */
+  reviewLevel: { value: ReviewLevel; default: ReviewLevel; overridden: boolean }
   timing: Record<TimingKey, TimingView>
 }
 
@@ -50,6 +53,7 @@ export type SettingsReply = ({ ok: true } & AlertSettingsView & { id?: string })
 export interface PutBody {
   triggers?: Partial<Record<TriggerKey, boolean | null>>
   timing?: Partial<Record<TimingKey, number | null>>
+  reviewLevel?: ReviewLevel | null
   publicUrl?: string | null
   hosts?: Record<string, HostAlertPatch | null>
 }
@@ -70,6 +74,7 @@ export const TRIGGER_GROUPS: Array<{
       { key: "caddy", label: "Caddy stops answering" },
       { key: "deploy_failed", label: "Caddy refuses a Deploy" },
       { key: "external_edit", label: "The Caddyfile is changed outside Fairway" },
+      { key: "review_failed", label: "Reviews keep failing", description: "Sent when two Reviews in a row fail, with the reason." },
       { key: "rollback", label: "A Rollback is done", description: "Off by default, you just did it." },
     ],
   },
@@ -81,6 +86,15 @@ export const TRIGGER_GROUPS: Array<{
     ],
   },
 ]
+
+export const REVIEW_LEVEL_OPTIONS: Array<{ value: ReviewLevel; label: string }> = [
+  { value: "info", label: "Info" },
+  { value: "notable", label: "Notable" },
+  { value: "urgent", label: "Urgent" },
+  { value: "never", label: "Never" },
+]
+
+export const REVIEW_LEVEL_HINT = "A Review sends one message when it has a new Observation at or above this level. One that is still going on from the last Review does not count."
 
 export const TIMING_FIELDS: Array<{ key: TimingKey; before: string; after: string; unit: [string, string] }> = [
   { key: "caddyHoldSec", before: "Caddy must fail to answer for", after: "before it counts as down", unit: ["second", "seconds"] },
@@ -112,6 +126,7 @@ export function groupTriggers(view: Pick<AlertSettingsView, "triggers">) {
 }
 
 export const triggerBody = (key: TriggerKey, value: boolean | null): PutBody => ({ triggers: { [key]: value } })
+export const reviewLevelBody = (value: ReviewLevel | null): PutBody => ({ reviewLevel: value })
 export const timingBody = (key: TimingKey, value: number | null): PutBody => ({ timing: { [key]: value } })
 /** The empty string is sent as is: it means "no link", which is not the same as resetting. */
 export const publicUrlBody = (text: string | null): PutBody => ({ publicUrl: text === null ? null : text.trim() })

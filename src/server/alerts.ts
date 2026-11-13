@@ -4,7 +4,7 @@
  */
 
 export interface AlertPayload {
-  /** What kind of occurrence this is: `state`, `flapping`, `deploy_failed`, `external_edit` or `test`. */
+  /** What kind of occurrence this is: `state`, `flapping`, `deploy_failed`, `external_edit`, `review_found`, `review_failed` or `test`. */
   event: string;
   subject: string | null;
   state: string | null;
@@ -12,6 +12,8 @@ export interface AlertPayload {
   /** ISO time the State began or the occurrence happened. */
   since: string;
   message: string;
+  /** For a Review: the level of the most serious Observation. */
+  level?: string;
   link?: string;
   test?: boolean;
 }
@@ -51,6 +53,10 @@ export function ntfyLook(payload: AlertPayload): Look {
       return { title: "Fairway: deploy failed", priority: "high", tags: "x" };
     case "external_edit":
       return { title: "Fairway: Caddyfile edited", priority: "default", tags: "pencil2" };
+    case "review_found":
+      return { title: "Fairway: Review found something", priority: payload.level === "urgent" ? "high" : "default", tags: "mag" };
+    case "review_failed":
+      return { title: "Fairway: Reviews are failing", priority: "default", tags: "warning" };
     case "flapping":
       return { title: "Fairway: unstable", priority: "default", tags: "repeat" };
     default:

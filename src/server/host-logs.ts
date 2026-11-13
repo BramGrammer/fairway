@@ -32,7 +32,15 @@ export interface AccessLogLine {
 }
 
 export type HostLogResult =
-  | { ok: true; /** Base name of the file the lines come from. */ file: string; lines: AccessLogLine[] }
+  | {
+      ok: true;
+      /** Base name of the file the lines come from. */
+      file: string;
+      /** Oldest first. */
+      lines: AccessLogLine[];
+      /** True when reading stopped at its byte bound before `limit` lines matched, so older lines may match too. */
+      incomplete: boolean;
+    }
   | { ok: false; reason: "no-file-writer"; output: string }
   /** `file` is the expected base name; `configuredPath` is where Caddy writes it, which may be outside the mounted folder. */
   | { ok: false; reason: "missing-file"; file: string; configuredPath: string }
@@ -47,8 +55,78 @@ export interface HostLogOptions {
   logDir: string;
   host: string;
   limit: number;
-  /** Most bytes read from the end of any one file. Default 8 MiB. */
+  /** Narrows the lines to those matching every part that is set. */
+  filter?: HostLogFilter;
+  /** Most bytes read from the end of any one file. Default 8 MiB, or 64 MiB when a filter is active. */
   maxBytesPerFile?: number;
+  /** Most bytes read over all files together. Default unbounded, or 256 MiB when a filter is active. */
+  maxBytesTotal?: number;
+}
+
+export type StatusClassFilter = "1xx" | "2xx" | "3xx" | "4xx" | "5xx";
+
+/** A line must match every part that is set; the parts that take a list match any one entry. */
+export interface HostLogFilter {
+  /** Epoch milliseconds, inclusive. Lines without a timestamp never match a time bound. */
+  from?: number;
+  to?: number;
+  /** Exact status codes or classes such as "4xx". */
+  status?: Array<number | StatusClassFilter>;
+  /** The request path (the URI before any query) starts with this. */
+  pathPrefix?: string;
+  /** The client address, exactly. */
+  client?: string;
+}
+
+const STATUS_CLASS = /^[1-5]xx$/;
+
+/** Whether any part of the filter is set. */
+export function isFiltering(filter: HostLogFilter | undefined): boolean {
+  return !!filter && (filter.from !== undefined || filter.to !== undefined || !!filter.status?.length || !!filter.pathPrefix || !!filter.client);
+}
+
+export function matchesFilter(line: AccessLogLine, filter: HostLogFilter | undefined): boolean {
+  if (!filter) return true;
+  if (filter.from !== undefined && (line.time === null || line.time < filter.from)) return false;
+  if (filter.to !== undefined && (line.time === null || line.time > filter.to)) return false;
+  if (filter.status?.length) {
+    const status = line.status;
+    if (status === null) return false;
+    if (!filter.status.some((s) => (typeof s === "number" ? s === status : Math.floor(status / 100) === Number(s[0])))) return false;
+  }
+  if (filter.pathPrefix && !line.uri.split("?")[0].startsWith(filter.pathPrefix)) return false;
+  if (filter.client && line.client !== filter.client) return false;
+  return true;
+}
+
+/**
+ * Reads a filter from query parameters: `from` and `to` (epoch ms), `status` (comma separated codes
+ * or classes, "404,5xx"), `path` and `client`. Returns an error text for a value that cannot be read.
+ */
+export function parseHostLogFilter(get: (name: string) => string | undefined): { ok: true; filter: HostLogFilter } | { ok: false; error: string } {
+  const filter: HostLogFilter = {};
+  for (const name of ["from", "to"] as const) {
+    const raw = get(name);
+    if (raw === undefined || raw === "") continue;
+    const value = Number(raw);
+    if (!Number.isFinite(value)) return { ok: false, error: `Invalid ${name}` };
+    filter[name] = value;
+  }
+  const status = get("status");
+  if (status) {
+    const parts: Array<number | StatusClassFilter> = [];
+    for (const part of status.split(",").map((p) => p.trim().toLowerCase()).filter(Boolean)) {
+      if (STATUS_CLASS.test(part)) parts.push(part as StatusClassFilter);
+      else if (/^\d{3}$/.test(part)) parts.push(Number(part));
+      else return { ok: false, error: "Invalid status" };
+    }
+    if (parts.length > 0) filter.status = parts;
+  }
+  const path = get("path");
+  if (path) filter.pathPrefix = path;
+  const client = get("client")?.trim();
+  if (client) filter.client = client;
+  return { ok: true, filter };
 }
 
 type Obj = Record<string, unknown>;
@@ -104,7 +182,8 @@ function acceptsAccess(logger: Obj | undefined, name: string): boolean {
   return true;
 }
 
-function parseLine(text: string): AccessLogLine | null {
+/** Parses one JSON log line, or null when it is not an access log record. */
+export function parseAccessLine(text: string): AccessLogLine | null {
   let value: unknown;
   try {
     value = JSON.parse(text);
@@ -137,18 +216,24 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Rotated siblings of `file` in `dir`, newest first. Names are `<stem>-<timestamp><ext>`, as Caddy writes them. */
-async function rotatedSiblings(dir: string, file: string): Promise<string[]> {
+/**
+ * Rotated siblings of `file` in `dir`, newest first. Names are `<stem>-<timestamp><ext>`, as Caddy writes them,
+ * with `.gz` added when `compressed` is set (Caddy's `roll_gzip`, on by default). When both forms of one
+ * rotation exist (compression is still running), the plain one is kept.
+ */
+async function rotatedSiblings(dir: string, file: string, compressed = false): Promise<string[]> {
   const ext = extname(file);
   const stem = basename(file, ext);
-  const pattern = new RegExp(`^${escapeRegExp(stem)}-\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}(?:\\.\\d+)?${escapeRegExp(ext)}$`);
+  const pattern = new RegExp(`^${escapeRegExp(stem)}-\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}(?:\\.\\d+)?${escapeRegExp(ext)}${compressed ? "(?:\\.gz)?" : ""}$`);
   let names: string[];
   try {
     names = await readdir(dir);
   } catch {
     return [];
   }
-  return names.filter((n) => pattern.test(n)).sort().reverse();
+  const matching = names.filter((n) => pattern.test(n));
+  const plain = new Set(matching);
+  return matching.filter((n) => !n.endsWith(".gz") || !plain.has(n.slice(0, -3))).sort().reverse();
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -164,7 +249,10 @@ export type HostLogFile =
   | { ok: true; /** Base name of the file. */ file: string; /** Full path inside `logDir`. */ path: string; /** Rotated siblings, newest first. */ rotated: string[] }
   | Exclude<HostLogResult, { ok: true }>;
 
-export type HostLogResolveOptions = Pick<HostLogOptions, "logging" | "servers" | "logDir" | "host">;
+export type HostLogResolveOptions = Pick<HostLogOptions, "logging" | "servers" | "logDir" | "host"> & {
+  /** Also list gzip-compressed rotations (`.gz`). The Logs tab does not read them; the digest does. */
+  compressed?: boolean;
+};
 
 /** Resolves the file a host logs to from the running config. Reads the folder, nothing is cached. */
 export async function resolveHostLogFile(options: HostLogResolveOptions): Promise<HostLogFile> {
@@ -184,7 +272,7 @@ export async function resolveHostLogFile(options: HostLogResolveOptions): Promis
 
   const file = basename(configuredPath);
   const current = join(logDir, file);
-  const rotated = await rotatedSiblings(logDir, file);
+  const rotated = await rotatedSiblings(logDir, file, options.compressed);
   if (!(await exists(current)) && rotated.length === 0) {
     return { ok: false, reason: "missing-file", file, configuredPath };
   }
@@ -201,29 +289,55 @@ export function parseHostLines(lines: string[], host: string): AccessLogLine[] {
   const wanted = bareHost(host);
   const out: AccessLogLine[] = [];
   for (const text of lines) {
-    const line = parseLine(text);
+    const line = parseAccessLine(text);
     if (line && bareHost(line.host) === wanted) out.push(line);
   }
   return out;
 }
 
+const FILTERED_BYTES_PER_FILE = 64 * 1024 * 1024;
+const FILTERED_BYTES_TOTAL = 256 * 1024 * 1024;
+
 export async function readHostLog(options: HostLogOptions): Promise<HostLogResult> {
-  const { host, limit } = options;
+  const { host, limit, filter } = options;
   const resolved = await resolveHostLogFile(options);
   if (!resolved.ok) return resolved;
   const { file, path: current } = resolved;
 
+  const filtering = isFiltering(filter);
+  const perFile = options.maxBytesPerFile ?? (filtering ? FILTERED_BYTES_PER_FILE : undefined);
+  let remaining = options.maxBytesTotal ?? (filtering ? FILTERED_BYTES_TOTAL : Infinity);
+
   const found: AccessLogLine[] = []; // newest first
-  for (const candidate of [current, ...resolved.rotated]) {
+  let incomplete = false;
+  let done = false; // the limit is reached, or the lines are older than the time range
+  const files = [current, ...resolved.rotated];
+  for (const candidate of files) {
     if (found.length >= limit) break;
-    await scanLinesBackward(
+    if (remaining <= 0) {
+      incomplete = true;
+      break;
+    }
+    const bound = Math.min(perFile ?? 8 * 1024 * 1024, remaining);
+    const { truncated, scanned } = await scanLinesBackward(
       candidate,
       (text) => {
-        found.push(...parseHostLines([text], host));
+        const [line] = parseHostLines([text], host);
+        if (!line) return false;
+        // Lines are written in time order, so everything further back is older than the range too.
+        if (filter?.from !== undefined && line.time !== null && line.time < filter.from) {
+          done = true;
+          return true;
+        }
+        if (matchesFilter(line, filter)) found.push(line);
         return found.length >= limit;
       },
-      options.maxBytesPerFile,
+      bound,
     );
+    if (found.length >= limit) done = true;
+    if (done) break;
+    if (truncated) incomplete = true;
+    remaining -= scanned;
   }
-  return { ok: true, file, lines: found.reverse() };
+  return { ok: true, file, lines: found.reverse(), incomplete: incomplete && !done };
 }

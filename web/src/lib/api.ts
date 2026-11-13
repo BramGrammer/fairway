@@ -179,17 +179,20 @@ export interface HostLogLine {
 }
 
 export type HostLogReply =
-  | { ok: true; file: string; lines: HostLogLine[] }
+  /** `incomplete`: reading stopped at its byte bound before enough lines matched, so older lines may match too. */
+  | { ok: true; file: string; lines: HostLogLine[]; incomplete: boolean }
   | { ok: false; reason: "no-file-writer"; output: string }
   | { ok: false; reason: "missing-file"; file: string; configuredPath: string }
   | { ok: false; reason: "not-logged" }
   /** Caddy could not be reached (no `reason`). */
   | { ok: false; reason?: undefined; error: string }
 
+const hostQuery = (host: string, filter: URLSearchParams): string => new URLSearchParams([["host", host], ...filter]).toString()
+
 /** The recent access log lines of one host, read live from the running config. */
-export async function fetchHostLogs(host: string): Promise<HostLogReply> {
+export async function fetchHostLogs(host: string, filter: URLSearchParams = new URLSearchParams()): Promise<HostLogReply> {
   try {
-    const { body } = await api<HostLogReply>(`/api/host-logs?host=${encodeURIComponent(host)}`)
+    const { body } = await api<HostLogReply>(`/api/host-logs?${hostQuery(host, filter)}`)
     return body
   } catch (error) {
     return { ok: false, error: (error as Error).message }
@@ -197,6 +200,6 @@ export async function fetchHostLogs(host: string): Promise<HostLogReply> {
 }
 
 /** Opens the live tail of a host's log. Data events are JSON arrays of lines; an `end` event means reload. */
-export function openHostLogStream(host: string): EventSource {
-  return openStream(`/api/host-logs/stream?host=${encodeURIComponent(host)}`)
+export function openHostLogStream(host: string, filter: URLSearchParams = new URLSearchParams()): EventSource {
+  return openStream(`/api/host-logs/stream?${hostQuery(host, filter)}`)
 }

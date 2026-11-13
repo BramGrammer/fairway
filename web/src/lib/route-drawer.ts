@@ -4,6 +4,9 @@ export const MIN_DRAWER_WIDTH = 380
 export const DEFAULT_DRAWER_WIDTH = 520
 export const DRAWER_STORAGE_KEY = "fairway:route-drawer-width"
 
+/** The id of a Site's node in the routes graph. */
+export const siteNodeId = (site: { hosts: string[]; listen: string[] }) => `host:${site.hosts.join(",")}|${site.listen.join(",")}`
+
 /** The kind of a graph node, read from its id. */
 export function nodeKind(id: string): NodeKind {
   if (id.startsWith("host-group:") || id.startsWith("dest-group:")) return "group"

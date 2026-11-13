@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useContext, useEffect, useRef, useState } from "react"
+import { Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowUpIcon, ChevronRightIcon, InfoIcon, PauseIcon, PlayIcon, ScrollTextIcon } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -11,6 +11,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
+import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { SearchField } from "@/components/search-field"
 import { Spinner } from "@/components/ui/spinner"
@@ -35,6 +36,13 @@ import {
   type LogFilter,
   type StatusClass,
 } from "@/lib/host-log-filter"
+import {
+  isServerFiltering,
+  NO_SERVER_FILTER,
+  serverFilterParams,
+  type ServerLogFilter,
+  type TimeRange,
+} from "@/lib/host-log-query"
 import { LoginRequiredContext } from "@/lib/login-context"
 import { newestFirst, visibleRows } from "@/lib/host-log-view"
 import { PRESSED } from "@/lib/toggle-styles"
@@ -49,6 +57,13 @@ const BADGE_VARIANT = {
 } as const satisfies Record<StatusTone, "secondary" | "outline" | "default" | "destructive">
 
 const STATUS_CLASSES: StatusClass[] = ["2xx", "3xx", "4xx", "5xx"]
+const TIME_RANGES: Array<{ value: Exclude<TimeRange, "any">; label: string }> = [
+  { value: "1h", label: "1h" },
+  { value: "24h", label: "24h" },
+  { value: "7d", label: "7d" },
+]
+/** How long typing in the path and client boxes rests before the server is asked again. */
+const TYPING_MS = 350
 
 /** Most lines kept in the list; the oldest fall off. */
 const MAX_LINES = 500
@@ -65,6 +80,8 @@ interface Row {
 
 interface HostLogState {
   host: string
+  /** The filter this state was read with. */
+  filter: ServerLogFilter
   reply: HostLogReply
   rows: Row[]
   /** While paused, the id of the last row that was visible when pausing. */
@@ -72,10 +89,11 @@ interface HostLogState {
 }
 
 /**
- * Loads a host's log, then follows it live. When the stream ends (the host moved to another file, or the
- * connection dropped) the log is read again and the stream reopened. `reply` is null while loading.
+ * Loads a host's log through the server's filter, then follows it live with the same filter. When the stream
+ * ends (the host moved to another file, or the connection dropped) the log is read again and the stream
+ * reopened. `reply` is null while loading; `loading` is also true while a changed filter is being read.
  */
-function useHostLog(host: string) {
+function useHostLog(host: string, filter: ServerLogFilter) {
   const [state, setState] = useState<HostLogState | null>(null)
   const [attempt, setAttempt] = useState(0)
   const nextId = useRef(0)
@@ -89,17 +107,19 @@ function useHostLog(host: string) {
       source = undefined
       if (!cancelled) timer = setTimeout(() => setAttempt((n) => n + 1), RECONNECT_MS)
     }
-    void fetchHostLogs(host).then((reply) => {
+    // The time range counts back from when the log is read, not from when the filter was chosen.
+    const params = serverFilterParams(filter, Date.now())
+    void fetchHostLogs(host, params).then((reply) => {
       if (cancelled) return
       const rows = reply.ok ? reply.lines.map((line) => ({ id: nextId.current++, line })) : []
       // A reconnect while paused keeps what is on screen; lines written meanwhile are skipped.
-      setState((s) => (s && s.host === host && s.pausedAfter !== null && reply.ok ? { ...s, reply } : { host, reply, rows, pausedAfter: null }))
+      setState((s) => (s && s.host === host && s.filter === filter && s.pausedAfter !== null && reply.ok ? { ...s, reply } : { host, filter, reply, rows, pausedAfter: null }))
       // A host that cannot be read yet (new `log` block, file not created) is checked again after a while.
       if (!reply.ok) {
         timer = setTimeout(() => setAttempt((n) => n + 1), RETRY_MS)
         return
       }
-      source = openHostLogStream(host)
+      source = openHostLogStream(host, params)
       source.onmessage = (event) => {
         const lines = JSON.parse(event.data) as HostLogLine[]
         const added = lines.map((line) => ({ id: nextId.current++, line }))
@@ -113,7 +133,7 @@ function useHostLog(host: string) {
       clearTimeout(timer)
       source?.close()
     }
-  }, [host, attempt])
+  }, [host, filter, attempt])
 
   const current = state?.host === host ? state : null
   const setPaused = (paused: boolean) =>
@@ -121,7 +141,13 @@ function useHostLog(host: string) {
       if (!s) return s
       return { ...s, pausedAfter: paused ? (s.rows.at(-1)?.id ?? -1) : null }
     })
-  return { reply: current?.reply ?? null, rows: current?.rows ?? [], pausedAfter: current?.pausedAfter ?? null, setPaused }
+  return {
+    reply: current?.reply ?? null,
+    rows: current?.rows ?? [],
+    pausedAfter: current?.pausedAfter ?? null,
+    loading: current !== null && current.filter !== filter,
+    setPaused,
+  }
 }
 
 function PrivacyNote() {
@@ -232,11 +258,30 @@ function Message({ title, text }: { title: string; text: string }) {
   )
 }
 
+/** The path and client the reader typed, once they have stopped typing for a moment. */
+function useTyped(path: string, client: string) {
+  // Starts as given, so a filter that came with a link reads the log once, not twice.
+  const [typed, setTyped] = useState({ path, client })
+  useEffect(() => {
+    const timer = setTimeout(() => setTyped({ path, client }), TYPING_MS)
+    return () => clearTimeout(timer)
+  }, [path, client])
+  return typed
+}
+
 /** The recent access log lines of one host. */
-export function HostLogsTab({ host }: { host: string }) {
-  const { reply, rows, pausedAfter, setPaused } = useHostLog(host)
-  const [classes, setClasses] = useState<StatusClass[]>([])
+export function HostLogsTab({ host, initial = NO_SERVER_FILTER }: { host: string; initial?: ServerLogFilter }) {
+  const [classes, setClasses] = useState<StatusClass[]>(initial.classes)
+  const [range, setRange] = useState<TimeRange>(initial.range)
+  const [path, setPath] = useState(initial.path)
+  const [client, setClient] = useState(initial.client)
   const [query, setQuery] = useState("")
+  const typed = useTyped(path, client)
+  const serverFilter = useMemo<ServerLogFilter>(
+    () => ({ classes, range, path: typed.path, client: typed.client }),
+    [classes, range, typed.path, typed.client],
+  )
+  const { reply, rows, pausedAfter, loading, setPaused } = useHostLog(host, serverFilter)
   const loginRequired = useContext(LoginRequiredContext)
   // The table's scroll viewport, which tells when the reader has scrolled away from the newest lines.
   const [scroller, setScroller] = useState<HTMLElement | null>(null)
@@ -264,10 +309,11 @@ export function HostLogsTab({ host }: { host: string }) {
     scroller?.scrollTo({ top: 0 })
     setReading(null)
   }
-  const filter: LogFilter = { classes: new Set(classes), query }
+  // Status, path, client and time are filtered by the server; the search only narrows the lines shown.
+  const filter: LogFilter = { classes: new Set(), query }
   const matching = new Set(filterLines(shown.map((row) => row.line), filter))
   const visible = newestFirst(shown.filter((row) => matching.has(row.line)))
-  const filtering = classes.length > 0 || query.trim() !== ""
+  const filtering = isServerFiltering(serverFilter) || query.trim() !== ""
   const paused = pausedAfter !== null
 
   const pauseLabel = paused ? (held > 0 ? `Resume (${held} new)` : "Resume the live view") : "Pause the live view"
@@ -285,7 +331,7 @@ export function HostLogsTab({ host }: { host: string }) {
   } else {
     content = (
       <>
-        <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2">
           <ToggleGroup
             className="shrink-0"
             variant="outline"
@@ -301,8 +347,36 @@ export function HostLogsTab({ host }: { host: string }) {
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
+          <ToggleGroup
+            className="shrink-0"
+            variant="outline"
+            spacing={0}
+            aria-label="Filter by time"
+            value={range === "any" ? [] : [range]}
+            onValueChange={(value) => setRange((value[0] as TimeRange | undefined) ?? "any")}
+          >
+            {TIME_RANGES.map(({ value, label }) => (
+              <ToggleGroupItem key={value} value={value} className={PRESSED} aria-label={`Last ${label}`}>
+                {label}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+          <Input
+            className="w-28 shrink-0"
+            value={path}
+            onChange={(event) => setPath(event.target.value)}
+            placeholder="Path starts with"
+            aria-label="Path starts with"
+          />
+          <Input
+            className="w-28 shrink-0"
+            value={client}
+            onChange={(event) => setClient(event.target.value)}
+            placeholder="Client"
+            aria-label="Client address"
+          />
           <SearchField
-            className="min-w-0 flex-1"
+            className="min-w-40 flex-1"
             value={query}
             onChange={setQuery}
             placeholder="Search requests"
@@ -313,6 +387,7 @@ export function HostLogsTab({ host }: { host: string }) {
             {paused ? <PlayIcon /> : <PauseIcon />}
           </ToolbarToggle>
           {paused && held > 0 && <Badge variant="secondary">{held} new</Badge>}
+          {loading && <Spinner />}
         </div>
         <div className="relative min-h-0 flex-1">
           {unread > 0 && (
@@ -323,7 +398,7 @@ export function HostLogsTab({ host }: { host: string }) {
               </Button>
             </div>
           )}
-          {shown.length === 0 ? (
+          {shown.length === 0 && !filtering ? (
             <Message title="No requests yet" text={`There are no requests for ${host} yet.`} />
           ) : visible.length === 0 && filtering ? (
             <Message title="No matching requests" text="No lines match the current filter." />
@@ -333,8 +408,15 @@ export function HostLogsTab({ host }: { host: string }) {
             </ScrollArea>
           )}
         </div>
-        <div className="shrink-0 truncate border-t px-4 py-2 font-mono text-xs text-muted-foreground" title={reply.file}>
-          {reply.file}
+        <div className="flex shrink-0 items-center gap-2 border-t px-4 py-2 font-mono text-xs text-muted-foreground">
+          <span className="min-w-0 truncate" title={reply.file}>
+            {reply.file}
+          </span>
+          {reply.incomplete && (
+            <span className="ml-auto shrink-0 font-sans" role="status">
+              Only the newest part of the log was searched, so older lines may match too.
+            </span>
+          )}
         </div>
       </>
     )

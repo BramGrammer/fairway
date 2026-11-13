@@ -18,6 +18,13 @@ x-editor: &editor
     NTFY_URL: ${NTFY_URL:-}
     NTFY_TOKEN: ${NTFY_TOKEN:-}
     PUBLIC_URL: ${PUBLIC_URL:-}
+    # The model endpoint for the Assistant and Reviews (see README). Empty address means OpenRouter, empty interval means 24h.
+    # Both features need the login below. Keep the key out of the repo.
+    AI_BASE_URL: ${AI_BASE_URL:-}
+    AI_API_KEY: ${AI_API_KEY:-}
+    AI_ASSISTANT_MODEL: ${AI_ASSISTANT_MODEL:-}
+    AI_REVIEW_MODEL: ${AI_REVIEW_MODEL:-}
+    AI_REVIEW_INTERVAL: ${AI_REVIEW_INTERVAL:-}
     # The Owner's login (see README). Leave AUTH_USER empty to run without a login.
     AUTH_USER: ${AUTH_USER:-}
     AUTH_PASSWORD: ${AUTH_PASSWORD:-}

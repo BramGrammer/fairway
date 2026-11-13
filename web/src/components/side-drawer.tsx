@@ -1,14 +1,25 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
 import { XIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
-import { clampDrawerWidth, DRAWER_STORAGE_KEY, parseStoredWidth } from "@/lib/route-drawer"
+import {
+  clampDrawerWidth,
+  DRAWER_STORAGE_KEY,
+  parseStoredWidth,
+} from "@/lib/route-drawer"
 
-function readWidth(): number {
+function readWidth(key: string): number {
   try {
-    return parseStoredWidth(localStorage.getItem(DRAWER_STORAGE_KEY))
+    return parseStoredWidth(localStorage.getItem(key))
   } catch {
     return parseStoredWidth(null)
   }
@@ -27,14 +38,29 @@ interface SideDrawerProps {
   flush?: boolean
   /** The content lays itself out to the height of the drawer and scrolls what needs scrolling; the body does not scroll. */
   fill?: boolean
+  /** Sits beside the page as a column of its own, not over it. It needs a flex row as its parent. */
+  docked?: boolean
+  /** Where the width is remembered; drawers that should not share a width give their own. */
+  storageKey?: string
   onClose: () => void
   children: ReactNode
 }
 
 /** Non-modal panel laid over the right edge of its parent, which must be positioned. Resizable, and Escape closes it. */
-export function SideDrawer({ label, title, actions, tabs, flush = false, fill = false, onClose, children }: SideDrawerProps) {
+export function SideDrawer({
+  label,
+  title,
+  actions,
+  tabs,
+  flush = false,
+  fill = false,
+  docked = false,
+  storageKey = DRAWER_STORAGE_KEY,
+  onClose,
+  children,
+}: SideDrawerProps) {
   const ref = useRef<HTMLElement>(null)
-  const [width, setWidth] = useState(readWidth)
+  const [width, setWidth] = useState(() => readWidth(storageKey))
 
   const resize = useCallback((next: number) => {
     const parent = ref.current?.parentElement?.clientWidth ?? window.innerWidth
@@ -45,8 +71,10 @@ export function SideDrawer({ label, title, actions, tabs, flush = false, fill = 
   useLayoutEffect(() => {
     const drawer = ref.current
     const parent = drawer?.parentElement
-    if (!drawer || !parent) return
-    const publish = () => parent.style.setProperty("--side-drawer-width", `${drawer.offsetWidth}px`)
+    // A docked drawer covers nothing, so there is nothing to stay clear of.
+    if (docked || !drawer || !parent) return
+    const publish = () =>
+      parent.style.setProperty("--side-drawer-width", `${drawer.offsetWidth}px`)
     publish()
     const observer = new ResizeObserver(publish)
     observer.observe(drawer)
@@ -54,23 +82,26 @@ export function SideDrawer({ label, title, actions, tabs, flush = false, fill = 
       observer.disconnect()
       parent.style.removeProperty("--side-drawer-width")
     }
-  }, [])
+  }, [docked])
 
   useEffect(() => {
     try {
-      localStorage.setItem(DRAWER_STORAGE_KEY, String(width))
+      localStorage.setItem(storageKey, String(width))
     } catch {
       // Storage can be unavailable; the width just won't be remembered.
     }
-  }, [width])
+  }, [width, storageKey])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented) onClose()
+      if (event.key !== "Escape" || event.defaultPrevented) return
+      // A docked drawer stays beside the page, so Escape in the page must not close it.
+      if (docked && !ref.current?.contains(document.activeElement)) return
+      onClose()
     }
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
-  }, [onClose])
+  }, [onClose, docked])
 
   const startDrag = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault()
@@ -89,8 +120,14 @@ export function SideDrawer({ label, title, actions, tabs, flush = false, fill = 
     <section
       ref={ref}
       aria-label={label}
-      className="absolute inset-y-0 right-0 z-10 flex flex-col border-l bg-card shadow-[-8px_0_24px_-16px_rgb(0_0_0/0.25)]"
-      style={{ width, maxWidth: "70%" }}
+      className={cn(
+        "flex flex-col",
+        !docked && "bg-card",
+        docked
+          ? "relative h-svh shrink-0 text-sidebar-foreground"
+          : "absolute inset-y-0 right-0 z-10 border-l shadow-[-8px_0_24px_-16px_rgb(0_0_0/0.25)]"
+      )}
+      style={{ width, maxWidth: docked ? "50%" : "70%" }}
     >
       <div
         role="separator"
@@ -109,13 +146,32 @@ export function SideDrawer({ label, title, actions, tabs, flush = false, fill = 
       >
         <span className="h-10 w-1 rounded-full bg-border transition-colors group-hover:bg-muted-foreground/50 group-focus-visible:bg-ring" />
       </div>
-      <div className="flex shrink-0 items-center gap-3 border-b px-5 py-4">
+      {/* Docked, the header is the height of the page header beside it and starts at the same line, below the inset's margin. */}
+      <div
+        className={cn(
+          "flex shrink-0 items-center gap-3",
+          docked ? "h-14 pr-3 pl-4 md:mt-2" : "border-b px-5 py-4"
+        )}
+      >
         {title}
-        <div className="ml-auto flex items-center gap-3">
+        <div
+          className={cn(
+            "ml-auto flex items-center",
+            docked ? "gap-2" : "gap-3"
+          )}
+        >
           {actions}
-          <Button variant="ghost" size="icon-sm" aria-label="Close drawer" onClick={onClose}>
-            <XIcon />
-          </Button>
+          {/* A docked drawer is closed from the page's own toggle, and by Escape. */}
+          {!docked && (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Close drawer"
+              onClick={onClose}
+            >
+              <XIcon />
+            </Button>
+          )}
         </div>
       </div>
       {tabs}

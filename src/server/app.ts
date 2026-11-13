@@ -3,8 +3,12 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { createAuth, parseTrustProxy } from "./auth.js";
+import { createAuth, loadSecret, parseTrustProxy } from "./auth.js";
 import { AlertSettings, type Patch, type RouteMap, type TopicPatch } from "./alert-settings.js";
+import { listModels, testConnection, testToolCalling } from "./ai-endpoint.js";
+import { checkTurnBody, startConversationTurn } from "./conversation-turn.js";
+import { Conversations, placeholderKey } from "./conversations.js";
+import { AI_TASKS, AiSettings, type AiPatch, type AiTask } from "./ai-settings.js";
 import { parseNtfyUrls } from "./alerts.js";
 import { CaddyAdmin } from "./caddy-admin.js";
 import type { Config } from "./config.js";
@@ -12,7 +16,11 @@ import { DeployError, Deployer } from "./deploy.js";
 import { HostCheck } from "./host-check.js";
 import { EventTracker, type SubjectKind } from "./events.js";
 import { formatCaddyfile } from "./format.js";
-import { parseHostLines, readHostLog, resolutionKey, resolveHostLogFile } from "./host-logs.js";
+import { bareHost, matchesFilter, parseHostLines, parseHostLogFilter, readHostLog, resolutionKey, resolveHostLogFile } from "./host-logs.js";
+import { buildLogDigest } from "./log-digest.js";
+import { alertOnFinished } from "./review-alert.js";
+import { Reviews } from "./reviews.js";
+import { ReviewSchedule } from "./review-schedule.js";
 import { LogFollower, tailLines } from "./logs.js";
 import { MetricsTracker, WINDOWS_MS } from "./metrics.js";
 import { buildRouteMap } from "./route-map.js";
@@ -41,6 +49,9 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
     join(config.dataDir, "alert-settings.json"),
   );
   await alertSettings.load();
+  // The model endpoint follows the same rule: the environment's values, overridden by what the Owner saved.
+  const aiSettings = new AiSettings({ baseUrl: config.aiBaseUrl, apiKey: config.aiApiKey, assistantModel: config.aiAssistantModel, reviewModel: config.aiReviewModel, reviewInterval: config.aiReviewInterval }, join(config.dataDir, "ai-settings.json"));
+  await aiSettings.load();
   const events = new EventTracker({ file: join(config.dataDir, "events.json") });
   // Which hosts use which upstream, so an upstream's Alert can be left out when none of its hosts want one.
   let routeMap: RouteMap = { upstreamHosts: new Map() };
@@ -79,6 +90,24 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
   if (!auth.enabled) console.warn("fairway: no login configured (AUTH_USER and AUTH_PASSWORD), anyone who can reach this page can change your proxy");
 
   const app = new Hono();
+  // Conversations with the Assistant need a login, so the key behind their placeholder numbers can come from its secret.
+  const conversations = new Conversations({ file: join(config.dataDir, "conversations.json"), key: placeholderKey(auth.enabled ? await loadSecret(config.dataDir) : Buffer.alloc(32)) });
+  await conversations.load();
+  onShutdown.push(() => conversations.save());
+  const reviews = new Reviews({
+    file: join(config.dataDir, "reviews.json"),
+    settings: aiSettings,
+    loadLive: () => liveLogConfig(),
+    logDir: config.logDir,
+    loginRequired: auth.enabled,
+    // A Review that found something serious is an Event like any other, and the Alert follows from it (ADR 0006).
+    onFinished: alertOnFinished({ level: () => alertSettings.effective().policy.reviewLevel, record: (found) => events.recordReviewFound(found), recordFailing: (failing) => events.recordReviewFailing(failing) }),
+  });
+  await reviews.load();
+  onShutdown.push(() => reviews.save());
+  const reviewSchedule = new ReviewSchedule({ reviews, settings: aiSettings, loginRequired: auth.enabled });
+  reviewSchedule.start();
+  onShutdown.push(async () => reviewSchedule.stop());
   const logPath = join(config.logDir, config.logFile);
 
   // The login routes stay open; everything else under /api needs a Session once login is on.
@@ -134,9 +163,31 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
   app.get("/api/host-logs", async (c) => {
     const host = c.req.query("host")?.trim();
     if (!host) return c.json({ ok: false, error: "Missing host" }, 400);
+    const parsed = parseHostLogFilter((name) => c.req.query(name));
+    if (!parsed.ok) return c.json({ ok: false, error: parsed.error }, 400);
     const live = await liveLogConfig();
     if (!live.ok) return c.json({ ok: false, error: live.error }, 502);
-    return c.json(await readHostLog({ logging: live.logging, servers: live.servers, logDir: config.logDir, host, limit: 200 }));
+    return c.json(await readHostLog({ logging: live.logging, servers: live.servers, logDir: config.logDir, host, limit: 200, filter: parsed.filter }));
+  });
+
+  // A digest of the Access log of one Site (`host`, any of its hosts) or of every Site, over `from` to `to`
+  // (epoch ms; the last 24 hours by default, at most 31 days). The whole period is read, so it can take a moment.
+  app.get("/api/log-digest", async (c) => {
+    const to = c.req.query("to") ? Number(c.req.query("to")) : Date.now();
+    const from = c.req.query("from") ? Number(c.req.query("from")) : to - 24 * 3_600_000;
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from >= to) return c.json({ ok: false, error: "Invalid period" }, 400);
+    if (to - from > 31 * 24 * 3_600_000) return c.json({ ok: false, error: "The period is longer than 31 days" }, 400);
+    const live = await liveLogConfig();
+    if (!live.ok) return c.json({ ok: false, error: live.error }, 502);
+    let sites = summarizeRoutes(live.servers).map((site) => ({ hosts: site.hosts }));
+    const host = c.req.query("host")?.trim();
+    if (host) {
+      const wanted = bareHost(host);
+      sites = sites.filter((site) => site.hosts.some((h) => bareHost(h) === wanted));
+      if (sites.length === 0) return c.json({ ok: false, error: "No such site" }, 404);
+    }
+    const digest = await buildLogDigest({ logging: live.logging, servers: live.servers, logDir: config.logDir, sites, from, to });
+    return c.json({ ok: true, digest });
   });
 
   // Live tail of one host. Data events carry a JSON array of parsed lines for the host; the `end` event
@@ -144,6 +195,9 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
   app.get("/api/host-logs/stream", (c) => {
     const host = c.req.query("host")?.trim();
     if (!host) return c.json({ ok: false, error: "Missing host" }, 400);
+    const parsed = parseHostLogFilter((name) => c.req.query(name));
+    if (!parsed.ok) return c.json({ ok: false, error: parsed.error }, 400);
+    const filter = parsed.filter;
     const resolve = async () => {
       const live = await liveLogConfig();
       return live.ok ? resolveHostLogFile({ logging: live.logging, servers: live.servers, logDir: config.logDir, host }) : null;
@@ -156,7 +210,7 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
       }
       const key = resolutionKey(first);
       const follower = new LogFollower(first.path, (raw) => {
-        const lines = parseHostLines(raw, host);
+        const lines = parseHostLines(raw, host).filter((line) => matchesFilter(line, filter));
         if (lines.length > 0) void stream.writeSSE({ data: JSON.stringify(lines) });
       });
       await follower.start();
@@ -259,7 +313,7 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
   app.put("/api/settings/alerts", async (c) => {
     const body = await c.req.json<Patch>().catch(() => null);
     if (!body || typeof body !== "object") return c.json({ ok: false, error: "Send a JSON object." }, 400);
-    const result = await alertSettings.patch({ triggers: body.triggers, timing: body.timing, publicUrl: body.publicUrl, hosts: body.hosts });
+    const result = await alertSettings.patch({ triggers: body.triggers, timing: body.timing, reviewLevel: body.reviewLevel, publicUrl: body.publicUrl, hosts: body.hosts });
     return result.ok ? c.json(settingsView()) : c.json(result, answer(result));
   });
 
@@ -283,6 +337,111 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
     if (!auth.enabled) return c.json(needsLogin(), 403);
     const result = await alertSettings.removeTopic(c.req.param("id"));
     return result.ok ? c.json(settingsView()) : c.json(result, result.error === "No such topic." ? 404 : 400);
+  });
+
+  // The model endpoint. The key can be written but never read back, and with no login neither the address nor
+  // the key can be written: Fairway would send the key and the Caddyfile to whatever address a visitor chose.
+  const aiView = () => ({ ok: true as const, canEdit: auth.enabled, ...aiSettings.view() });
+
+  app.get("/api/settings/ai", (c) => c.json(aiView()));
+
+  app.put("/api/settings/ai", async (c) => {
+    if (!auth.enabled) return c.json({ ok: false, error: "Sign in is required to change the model endpoint. Set AUTH_USER and a password first." }, 403);
+    const body = await c.req.json<AiPatch>().catch(() => null);
+    if (!body || typeof body !== "object") return c.json({ ok: false, error: "Send a JSON object." }, 400);
+    const result = await aiSettings.patch({ baseUrl: body.baseUrl, apiKey: body.apiKey, assistantModel: body.assistantModel, reviewModel: body.reviewModel, reviewInterval: body.reviewInterval, assistantPrice: body.assistantPrice });
+    return result.ok ? c.json(aiView()) : c.json(result, 400);
+  });
+
+  // Tests the endpoint in force. It takes no address from the request, so it needs no login.
+  app.post("/api/settings/ai/test", async (c) => {
+    const result = await testConnection(aiSettings.effective());
+    return c.json(result, result.ok ? 200 : 502);
+  });
+
+  // The endpoint's model list, for the pickers. An endpoint without a list answers 502 and the Owner types the name.
+  app.get("/api/settings/ai/models", async (c) => {
+    const result = await listModels(aiSettings.effective());
+    return c.json(result, result.ok ? 200 : 502);
+  });
+
+  // Tests the model chosen for a task: one small request with one tool. It takes no address or model from the
+  // request, only the task, so it needs no login.
+  app.post("/api/settings/ai/test-model", async (c) => {
+    const body = await c.req.json<{ task?: unknown }>().catch(() => null);
+    const task = AI_TASKS.find((t) => t === body?.task) as AiTask | undefined;
+    if (!task) return c.json({ ok: false, error: "Say which task to test: assistant or review." }, 400);
+    const model = aiSettings.model(task);
+    if (!model) return c.json({ ok: false, reason: "no_model", error: "Choose a model first." }, 400);
+    const result = await testToolCalling(aiSettings.effective(), model);
+    return c.json(result, result.ok ? 200 : 502);
+  });
+
+  // One turn of the Assistant in a stored Conversation, streamed. The browser sends the Conversation's id (null for a new
+  // one), the editor buffer, the Owner's message and, when one is pending, that Proposal; the server keeps the
+  // Conversation. Events: `conversation` {id, userMessageId, answerMessageId} first, then `text` {delta}, `context`
+  // {parts: [{key, tokens}]} (the estimated sizes of what the request is made of), `step` {step} (what ran and how
+  // long it took), `usage`
+  // {usage: {promptTokens, completionTokens}}, `validating` {attempt}, `proposal` {text, valid, findings, attempts,
+  // messageId}, `limit` {message}, `error` {reason, error}, and `done` last. Closing the request stops the model's answer too.
+  app.post("/api/assistant/turn", async (c) => {
+    if (!auth.enabled) return c.json({ ok: false, error: "Sign in is required to use the Assistant. Set AUTH_USER and a password first." }, 403);
+    const model = aiSettings.model("assistant");
+    if (!model) return c.json({ ok: false, error: "Choose a model for the Assistant in Settings first." }, 409);
+    const checked = checkTurnBody(await c.req.json().catch(() => null));
+    if (!checked.ok) return c.json(checked, 400);
+    const controller = new AbortController();
+    const deps = { endpoint: aiSettings.effective(), model, validate: async (text: string) => (await deployer.validate(text)).findings, signal: controller.signal };
+    const started = startConversationTurn(conversations, deps, checked.body);
+    if (!started.ok) return c.json({ ok: false, error: started.error }, started.status);
+    return streamSSE(c, async (stream) => {
+      stream.onAbort(() => controller.abort());
+      for await (const event of started.events) {
+        if (controller.signal.aborted) break;
+        const { type, ...data } = event;
+        await stream.writeSSE({ event: type, data: JSON.stringify(data) });
+      }
+      if (!controller.signal.aborted) await stream.writeSSE({ event: "done", data: "{}" });
+    });
+  });
+
+  // The stored Conversations: masked text only. Behind a Session, and refused without a login like the turn.
+  const conversationsGate = (): Response | null => (auth.enabled ? null : Response.json({ ok: false, error: "Sign in is required to use the Assistant. Set AUTH_USER and a password first." }, { status: 403 }));
+  app.get("/api/assistant/conversations", (c) => conversationsGate() ?? c.json({ ok: true, conversations: conversations.list() }));
+  app.get("/api/assistant/conversations/:id", (c) => {
+    const found = conversationsGate() ?? conversations.get(c.req.param("id"));
+    if (found instanceof Response) return found;
+    return found ? c.json({ ok: true, conversation: { id: found.id, title: found.title, updatedAt: found.updatedAt, usage: found.usage, messages: found.messages } }) : c.json({ ok: false, error: "No such Conversation." }, 404);
+  });
+  app.delete("/api/assistant/conversations/:id", async (c) => {
+    const gate = conversationsGate();
+    if (gate) return gate;
+    return (await conversations.delete(c.req.param("id"))) ? c.json({ ok: true }) : c.json({ ok: false, error: "No such Conversation." }, 404);
+  });
+  app.put("/api/assistant/conversations/:id/messages/:messageId/proposal", async (c) => {
+    const gate = conversationsGate();
+    if (gate) return gate;
+    const { status } = ((await c.req.json().catch(() => null)) ?? {}) as { status?: unknown };
+    if (status !== "accepted" && status !== "rejected" && status !== "outdated") return c.json({ ok: false, error: "A Proposal can be set to accepted, rejected or outdated." }, 400);
+    const result = conversations.decide(c.req.param("id"), Number(c.req.param("messageId")), status);
+    if (result === "missing") return c.json({ ok: false, error: "No such Proposal." }, 404);
+    if (result === "settled") return c.json({ ok: false, error: "That Proposal has already been decided." }, 409);
+    await conversations.save();
+    return c.json({ ok: true });
+  });
+
+  // Reviews: an AI model reads a digest of the Access logs (ADR 0009). Starting returns at once; the Review runs in
+  // the background and the list shows it as running until it is done or failed.
+  app.get("/api/reviews", (c) => c.json({ ok: true, running: reviews.running(), reviews: reviews.list(), schedule: reviewSchedule.status() }));
+
+  app.post("/api/reviews", async (c) => {
+    const result = await reviews.start();
+    return result.ok ? c.json({ ok: true, review: result.review }, 202) : c.json({ ok: false, error: result.error }, result.status);
+  });
+
+  app.get("/api/reviews/:id", (c) => {
+    const review = reviews.get(Number(c.req.param("id")));
+    return review ? c.json({ ok: true, review }) : c.json({ ok: false, error: "No such Review." }, 404);
   });
 
   app.get("/api/tls/status", (c) => c.json(sweep.snapshot()));

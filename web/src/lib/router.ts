@@ -1,10 +1,10 @@
 /** A small router: which page a URL shows, and the panels and view state kept in its query string. No React or DOM here. */
 
-export const PAGES = ["editor", "routes", "history", "events", "logs"] as const
+export const PAGES = ["editor", "routes", "history", "events", "reviews", "logs"] as const
 export type Page = (typeof PAGES)[number]
 
 export const DEFAULT_PAGE: Page = "editor"
-export const SETTINGS_CATEGORIES = ["general", "monitoring", "alerts", "access"] as const
+export const SETTINGS_CATEGORIES = ["general", "monitoring", "alerts", "ai", "access"] as const
 export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number]
 
 export interface Params {
@@ -18,8 +18,20 @@ export interface Params {
   q?: string
   /** Routes page: the node whose details drawer is open (a graph node id). */
   node?: string
+  /** Routes page: the drawer opens on this tab. Only "logs" is carried; the overview is the default. */
+  tab?: "logs"
+  /** Routes page: the Logs tab starts with this client address. Read once when the tab opens. */
+  client?: string
+  /** Routes page: the Logs tab starts with this path prefix. */
+  path?: string
+  /** Routes page: the Logs tab starts with this status class. */
+  status?: "2xx" | "3xx" | "4xx" | "5xx"
+  /** Routes page: the Logs tab starts with this time range. */
+  range?: "1h" | "24h" | "7d"
   /** History page: the selected revision, a number or "original". */
   revision?: string
+  /** Reviews page: the Review whose details drawer is open (its id). */
+  review?: string
 }
 
 export interface Resolved {
@@ -37,15 +49,18 @@ export interface LocationParts {
 
 const MAX_TEXT = 200
 const MAX_NODE = 500
+const MAX_CLIENT = 100
+const MAX_PATH = 500
 
 const isPage = (value: string): value is Page => (PAGES as readonly string[]).includes(value)
 
 /** Parameters each page owns. Settings belongs to every page. */
 const OWNED: Record<Page, (keyof Params)[]> = {
   editor: ["settings"],
-  routes: ["settings", "group", "source", "q", "node"],
+  routes: ["settings", "group", "source", "q", "node", "tab", "client", "path", "status", "range"],
   history: ["settings", "revision"],
   events: ["settings"],
+  reviews: ["settings", "review"],
   logs: ["settings"],
 }
 
@@ -66,12 +81,23 @@ export function parseParams(search: string, page: Page): Params {
   if (owns("q") && q && q.length <= MAX_TEXT) out.q = q
   const node = query.get("node")
   if (owns("node") && node && node.length <= MAX_NODE) out.node = node
+  if (owns("tab") && query.get("tab") === "logs") out.tab = "logs"
+  const client = query.get("client")
+  if (owns("client") && client && client.length <= MAX_CLIENT) out.client = client
+  const logPath = query.get("path")
+  if (owns("path") && logPath && logPath.length <= MAX_PATH) out.path = logPath
+  const status = query.get("status")
+  if (owns("status") && /^[2-5]xx$/.test(status ?? "")) out.status = status as Params["status"]
+  const range = query.get("range")
+  if (owns("range") && (range === "1h" || range === "24h" || range === "7d")) out.range = range
   const revision = query.get("revision")
   if (owns("revision") && revision && (revision === "original" || /^\d{1,9}$/.test(revision))) out.revision = revision
+  const review = query.get("review")
+  if (owns("review") && review && /^\d{1,9}$/.test(review)) out.review = review
   return out
 }
 
-const ORDER: (keyof Params)[] = ["settings", "group", "source", "q", "node", "revision"]
+const ORDER: (keyof Params)[] = ["settings", "group", "source", "q", "node", "tab", "client", "path", "status", "range", "revision", "review"]
 
 /** The URL of a page with its parameters. Parameters the page does not own are left out. */
 export function buildUrl(page: Page, params: Params = {}): string {
