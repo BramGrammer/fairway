@@ -108,6 +108,7 @@ These variables are the defaults. **Settings › Alerts** changes them without a
 
 - **Topics:** add more, each with its own token, switch each on or off and send a test to one. Topics from the environment can be switched off but not edited or removed. Addresses and tokens are never shown again after you save them.
 - **What sends an Alert** (Settings › Alerts): a switch for Caddy not answering, a refused Deploy, an outside edit and a Rollback (off by default), plus recovery messages and the flapping message with its limits.
+- **Reviews** (Settings › Alerts): the lowest level of Observation that makes a finished Review send one message: info, notable, urgent (the default) or never. Observations marked as still going on from the last Review do not count. The Event is recorded whatever the level allows an Alert for; the message names the Sites and the most serious Observation and links to the Review when a public address is set.
 - **How long a problem must last** (Settings › Monitoring): how long Caddy and upstreams must fail before they count as down. A shorter blip never shows in the history or sends an Alert.
 - **Public address** (Settings › General): `PUBLIC_URL` is its default. It makes each message open Fairway when tapped.
 - **Which hosts send Alerts:** none do until you switch them on, in the route drawer on the Routes page. A host's switch has a menu to pick what it sends for (its Certificate, the host check, the upstreams it uses) and to snooze it for an hour or a day. An upstream shared by several hosts alerts while any of them is on, and its message names them. Caddy itself, a refused Deploy and an outside edit are not about a host and follow the switches above. A host that leaves the Caddyfile keeps its settings. Muted hosts are still watched: the history and timeline record everything.
@@ -128,13 +129,83 @@ Fairway has one **Owner**. Set `AUTH_USER` and either `AUTH_PASSWORD` or `AUTH_P
 - A hash keeps the password out of `.env`. Make one with `node -e "import('./dist/server/auth.js').then(async m => console.log(await m.hashPassword(process.argv[1])))" 'your password'` inside the container. The hash contains `$` characters, so single-quote it (or double each `$`) in `.env` and in a Compose file. If both are set, the hash wins.
 - Behind Caddy, set `TRUST_PROXY` to Caddy's address (or range). Fairway then reads the visitor's address from `X-Forwarded-For`, and treats the connection as HTTPS when Caddy says so (which marks the session cookie Secure). Without it those headers are ignored, so a client cannot fake its address. Caddy's `reverse_proxy` already replaces these headers from clients it does not trust.
 
+## Assistant and Reviews
+
+Two optional features use an AI model, and both are off until you choose a model:
+
+- **Assistant:** a chat beside the editor. Ask about the Caddyfile, or ask for a change. A change comes back as a **Proposal**, a difference against what is in the editor, which you accept or reject.
+- **Reviews:** a scheduled read of the Access logs that reports **Observations**, such as probing or scanning, in the Reviews tab.
+
+Both need the **Owner's login** ([Login](#login)). Without `AUTH_USER` and a password they stay off and Settings › AI is read-only, because anyone who could reach an open Fairway could otherwise spend your credit and read your Conversations.
+
+### Connect a model
+
+Fairway talks to one endpoint that speaks the OpenAI chat-completions format, with one model for the Assistant and one for Reviews. Set them in **Settings › AI**, or as defaults in `.env`. Settings wins over the environment until you reset it, and is kept in `ai-settings.json` in `DATA_DIR` (mode 0600).
+
+| Endpoint | `AI_BASE_URL` | `AI_API_KEY` |
+| --- | --- | --- |
+| OpenRouter (the default) | empty | your OpenRouter key |
+| OpenAI, or another compatible service | its address, e.g. `https://api.openai.example.com/v1` | its key |
+| A local server such as Ollama | e.g. `http://192.0.2.20:11434/v1` | none needed |
+
+- A model name is as the endpoint names it, for example `vendor/model-name` on OpenRouter. **Test connection** checks the address and key; the model fields suggest names from the endpoint's list when it has one.
+- **The model must support tool calling.** The Assistant checks its drafts through a tool and a Review reads log lines through one. Not every model behind a compatible endpoint can. **Test tool calling** next to each model asks it to call a test tool and says if it does not. Run it before relying on a model.
+- The key is write-only: Settings shows only whether one is set and never the key, and the API never returns it. A key in `.env` is not shown either.
+- An address must start with `http://` or `https://`, with no login or query in it, and Fairway does not follow redirects. In a container, `localhost` is the container itself: use the host's address for a local server. An address, interval or model name that is not usable is ignored and the default applies.
+- With a local server, the Caddyfile and the digest go only as far as that server. It must be a model good enough for tool calling, which needs capable hardware.
+
+### What leaves your machine
+
+Read this before switching either feature on. Everything below is sent to the endpoint you chose, and so to whoever runs it.
+
+**Assistant, on every turn:**
+
+- the Caddyfile **as it is in the editor** at that moment, unsaved edits included, with recognised secrets replaced by placeholders such as `__FAIRWAY_SECRET_1__` (put back in a Proposal before you see it),
+- its Findings, with the same replacement in their text,
+- the Conversation so far (your messages and its answers; an earlier Proposal as a one-line note, not its text).
+
+It is sent nothing else: no Events, no Access logs, no Certificates.
+
+**Which secrets are recognised.** Fairway reads the text for exactly these, and nothing wider:
+
+- DNS provider credentials: the values in `dns` and `acme_dns` whose setting name contains `token`, `key`, `secret`, `password` or `credential` (identifiers such as `zone_id` are left),
+- password hashes in a `basic_auth` block,
+- values of `Authorization`, `Proxy-Authorization` and `Cookie` headers, and of any header whose name contains `key`, `token` or `secret`, in `header`, `header_up`, `header_down` and `request_header`.
+
+**The recognition does not cover everything.** Not recognised, so sent as written: a secret in any other directive or plugin (for example `forward_auth`, ACME account keys, a login in an upstream address such as `https://user:password@app.example.test`, a `respond` body); a `basic_auth` written on one line; credentials in headers with other names (`X-Auth`, `X-Password`); and anything in a heredoc. Values already written as a placeholder (`{env.X}`) are left alone, as they should be. The Finding "a secret is written in the Caddyfile" is the backstop for the cases it knows, and it does not know the rest. **Keep secrets out of the Caddyfile with `{env.X}` placeholders**, and set the variable in Caddy's environment.
+
+**Review:**
+
+- **The digest**, one per Site with an Access log, built by Fairway from the logs and not the lines: request totals and the split by status code, per hour; the 15 clients with the most requests and the 15 with the highest share of 4xx answers (at least 10 requests), with their addresses; the 15 paths most often answered 401, 403 or 404; unusual methods; the 15 most common user agents; and which log files and parts of the period were read. Query strings are cut and paths and user agents are shortened.
+- **The Site summary**: each Site's hosts, its Rules' matchers (such as paths), Middleware names and Destination kinds. Not the Caddyfile text, upstream addresses or secrets.
+- **The previous Review's Observations** (level, Sites, title, explanation), so ongoing scanning is not reported as new.
+- **Log lines, only when the model asks for them** (up to 8 requests of at most 100 lines each, for one Site and the Review's period): time, status, method, host, path, **client address**, duration, size and user agent. The query string is removed, headers and the raw line are never included. **Client IP addresses are sent as they are**; so are paths, hosts and user agents, which can still hold a token or a name if an app puts one there.
+
+**What Fairway keeps.** In `DATA_DIR`: `conversations.json` (mode 0600) and `reviews.json` (mode 0600), each for 30 days. A stored Conversation holds the masked text, so no recognised secret. It does hold your own messages, and a secret you typed that is not in the Caddyfile is stored, and was sent, as you typed it. A Review keeps its Observations, which can name client addresses and paths, the period, the model, the token usage and which lines were requested, not the lines.
+
+### What the AI cannot do
+
+- **The Assistant never reloads and never deploys.** A Proposal only changes the editor when you accept it. You then Deploy through the usual Validation, confirmation of warnings and Reload ([How a save works](#how-a-save-works)). It has no tool for anything else. It is also a model: a Proposal can be valid and still be wrong (the right syntax on the wrong Site), so read the difference.
+- **A Review is read-only.** It never touches the Caddyfile, and the only thing it can write is its own record of Observations.
+- **Log text is written by outsiders** and Fairway tells the model to treat it as data. A model can still be talked into things. The worst a successful injection can do is hide an Observation or invent one, so do not rely on a Review as your only alarm.
+
+### How it behaves
+
+- **Validation of drafts.** Before a Proposal is shown it goes through Validation and the model gets the Findings back to correct itself, three attempts at most. After that it is shown anyway, marked as not valid (the button reads "Accept anyway"), because a near miss can still help. One Proposal is pending at a time; a follow-up message revises it, and if the editor changes underneath it is marked outdated and cannot be accepted.
+- **Limits per Assistant turn:** 6 tool calls, and an answer of at most 4,000 tokens. The Caddyfile may be at most 200,000 characters, and a Conversation at most 80 messages or 60,000 characters before you must start a new one. At most 200 Conversations are kept.
+- **Limits per Review:** 8 requests for log lines of at most 100 lines, an answer of at most 4,000 tokens, 256 MiB of log read (the oldest part of the period is dropped first) and 5 minutes in all.
+- **Usage.** Tokens read and written are shown under each Assistant answer and as a Conversation total, and in the Tokens column and the details of each Review. Fairway shows tokens, not money; the endpoint's own dashboard has the cost.
+- **Schedule** (Settings › AI › Reviews run): off, every 6 hours, every 12 hours, every 24 hours (the default) or weekly, and **Review now** in the Reviews tab. It runs inside Fairway, about 2 minutes after a start, and needs a model for Reviews and a login. A Review covers the time since the previous successful one (the last 24 hours for the first), for at most 31 days. Fairway keeps no copy of the logs, so what Caddy has rotated away, or beyond the read limit, or a Site without a readable Access log, is listed in the Review under "What could not be seen" and not judged.
+- **Alerts.** A Review that finds something new at or above the level in **Settings › Alerts** (default urgent) records one Event, which sends one Alert when topics are set up (see [History and alerts](#history-and-alerts)).
+- **Failure.** A failed Review is listed with its reason. A scheduled one is tried once more an hour later; one that you started is not retried. The second failure in a row records an Event (an Alert too, unless you switched off the "Reviews keep failing" message), so a revoked key does not go unnoticed. The next successful Review covers the missed time.
+
 ## Configuration
 
 | Variable | Default | |
 | --- | --- | --- |
 | `ADMIN_SOCKET` | `/run/caddy-admin/admin.sock` | Caddy admin API socket |
 | `CADDYFILE_PATH` | `/caddyfile/Caddyfile` | The mounted Caddyfile |
-| `DATA_DIR` | `/data` | Original, Revisions, the login secret, the traffic history (`metrics.json`) and the event history (`events.json`) and the alert settings you changed (`alert-settings.json`). Mount it as a volume to keep them across restarts |
+| `DATA_DIR` | `/data` | Original, Revisions, the login secret, the traffic history (`metrics.json`) and the event history (`events.json`) the alert settings you changed (`alert-settings.json`), the AI settings you changed (`ai-settings.json`), and the Conversations and Reviews (`conversations.json`, `reviews.json`). Mount it as a volume to keep them across restarts |
 | `LOG_DIR`, `LOG_FILE` | `/var/log/caddy`, `access.log` | Where Caddy writes its JSON log. The TLS tab's last issuance error needs Caddy's default logger (not only access logs) to write here. |
 | `MAX_REVISIONS` | `50` | Deployed Revisions kept |
 | `AUTH_USER`, `AUTH_PASSWORD` | unset | The Owner's login, see [Login](#login). Both, or neither |
@@ -142,6 +213,11 @@ Fairway has one **Owner**. Set `AUTH_USER` and either `AUTH_PASSWORD` or `AUTH_P
 | `TRUST_PROXY` | unset | Comma separated proxy addresses or CIDR ranges whose `X-Forwarded-*` headers are believed |
 | `NTFY_URL` | unset | ntfy topic address(es), comma separated, for Alerts, see [History and alerts](#history-and-alerts). Treat as a secret |
 | `NTFY_TOKEN` | unset | Access token for the topic, if it needs a login |
+| `AI_BASE_URL` | `https://openrouter.ai/api/v1` | Address of an OpenAI-compatible model endpoint (OpenRouter, OpenAI, or a local server). Only a default: Settings › AI overrides it. See [Assistant and Reviews](#assistant-and-reviews) |
+| `AI_API_KEY` | unset | Key for that endpoint (a local server needs none). Treat as a secret; Settings › AI can replace it and never shows it |
+| `AI_ASSISTANT_MODEL` | unset | Model the Assistant uses, as the endpoint names it. It must support tool calling. Without it the Assistant is off. Only a default: Settings › AI overrides it |
+| `AI_REVIEW_MODEL` | unset | Model Reviews use, with the same rules; without it Reviews are off |
+| `AI_REVIEW_INTERVAL` | `24h` | How often a Review runs by itself: `off`, `6h`, `12h`, `24h` or `weekly`. It only runs with a Reviews model and a login. Only a default: Settings › AI overrides it |
 | `PUBLIC_URL` | unset | Fairway's own address, makes each Alert open Fairway when tapped |
 | `HOST_CHECK` | unset | `1` turns on the request-per-host check; needs `TLS_PROBE_ADDR` |
 | `TLS_PROBE_ADDR` | unset | Caddy's HTTPS address as the editor reaches it, `host` or `host:port` (port defaults to 443), e.g. `192.0.2.10:443`. Turns on Certificate probing in the TLS tab, see below |

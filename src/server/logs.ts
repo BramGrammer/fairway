@@ -26,18 +26,19 @@ export async function tailLines(path: string, count: number): Promise<string[]> 
  * Walks a file's complete lines from the newest to the oldest, reading backwards in chunks.
  * Stops when `visit` returns true, at the start of the file, or after `maxBytes` bytes, so a huge
  * file is never loaded whole. A line cut off by the byte limit is dropped. Missing files yield nothing.
+ * Resolves to the bytes read, and `truncated: true` when the byte limit stopped the walk before the start of the file.
  */
 export async function scanLinesBackward(
   path: string,
   visit: (line: string) => boolean | void,
   maxBytes = 8 * 1024 * 1024,
   chunkSize = 128 * 1024,
-): Promise<void> {
+): Promise<{ truncated: boolean; scanned: number }> {
   let handle;
   try {
     handle = await open(path, "r");
   } catch {
-    return;
+    return { truncated: false, scanned: 0 };
   }
   try {
     const { size } = await handle.stat();
@@ -57,10 +58,11 @@ export async function scanLinesBackward(
       carry = Buffer.from(first, "utf8");
       for (let i = parts.length - 1; i >= 0; i--) {
         const line = parts[i];
-        if (line && visit(line) === true) return;
+        if (line && visit(line) === true) return { truncated: false, scanned };
       }
     }
     if (position === 0 && carry.length > 0) visit(carry.toString("utf8"));
+    return { truncated: position > 0, scanned };
   } finally {
     await handle.close();
   }

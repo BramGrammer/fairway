@@ -10,7 +10,7 @@ A Review is a scheduled read of the Access logs by an AI model, looking for requ
 
 ## Consequences
 
-- **The digest** holds, per Site: request totals and the split by status code per hour, the top clients by request count and by share of 4xx responses, the top paths answered with 401, 403 or 404, unusual methods, the top user agents, and the same totals from the previous Review. The model only sees what the digest was built to surface; the tool covers the rest.
+- **The digest** holds, per Site: request totals and the split by status code per hour, the top clients by request count and by share of 4xx responses, the top paths answered with 401, 403 or 404, unusual methods, and the top user agents. The model also gets the previous Review's Observations, not its totals, so it can tell what is new. The model only sees what the digest was built to surface; the tool covers the rest.
 - **The tool returns parsed fields only**: time, status, method, host, path, client address, duration, size and user agent. Query-string values are stripped, headers are never included, and the raw line is never returned. It filters on host, time range, status, path prefix and client, with a limit on rows per call and on calls per Review. Client addresses are sent as they are, since a Review that cannot name an address cannot say anything useful about probing.
 - **The model also gets the Site summary** Fairway already derives (hosts, Rules, Middleware names, Destination types), not the Caddyfile text, so it can tell probing that a firewall turned away from probing that reached an upstream.
 - **A Review cannot change anything.** It has no tool that writes, and never touches the Caddyfile. A successful injection can hide an Observation or invent one, and nothing more. If a Review later suggests a block rule, it hands the suggestion to the Owner, who opens it in the Assistant ([ADR 0008](0008-the-assistant-proposes-the-owner-reloads.md)).
@@ -18,7 +18,7 @@ A Review is a scheduled read of the Access logs by an AI model, looking for requ
 - **Alerts go through the event log.** Each Observation has a level (info, notable or urgent). A Review with an Observation at or above the level the Owner chose, urgent unless changed, records one Event, which sends one Alert as in [ADR 0006](0006-events-and-alerts-from-one-log.md). The model is given the previous Review's Observations so that daily background scanning is marked as ongoing and not reported as new.
 - **Failure is visible.** A failed Review is listed with its reason and tried again after an hour. Two failures in a row record an Event, so a revoked key does not stop Reviews unnoticed. The next Review that succeeds covers the missed period.
 - **Schedule.** Off, every 6, 12 or 24 hours, or weekly, with 24 hours as the default, and a button to run one now. It runs inside Fairway's own process, like the Certificate sweep.
-- Reviews are kept for 30 days in `DATA_DIR`. Each has a hard limit on tool calls and tokens, and its usage is recorded and shown. A login is required, as for the Assistant.
+- Reviews are kept for 30 days in `DATA_DIR`, except that the newest finished Review is always kept, since the next period starts where it ended. A Review is bounded by a cap on the tokens of each model answer, a limit on calls for log lines and an overall timeout; its usage is recorded and shown, and there is no total token budget. A login is required, as for the Assistant.
 
 ## Considered
 

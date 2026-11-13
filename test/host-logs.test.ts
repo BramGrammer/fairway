@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 import { appendFile } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import { LogFollower } from "../src/server/logs.js";
-import { parseHostLines, readHostLog, resolutionKey, resolveHostLogFile } from "../src/server/host-logs.js";
+import { matchesFilter, parseHostLines, parseHostLogFilter, readHostLog, resolutionKey, resolveHostLogFile } from "../src/server/host-logs.js";
 
 async function folder(files: Record<string, string>): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "ce-hostlog-"));
@@ -199,7 +199,7 @@ describe("readHostLog", () => {
       host: "quiet.example.test",
       limit: 5,
     });
-    assert.deepEqual(result, { ok: true, file: "web.log", lines: [] });
+    assert.deepEqual(result, { ok: true, file: "web.log", lines: [], incomplete: false });
   });
 
   it("finds a custom-port host by its bare name, keyed with or without the port", async () => {
@@ -337,5 +337,172 @@ describe("live tail pieces", () => {
     await sleep(80);
     follower.stop();
     assert.deepEqual(seen, ["/new"]);
+  });
+});
+
+describe("readHostLog with a filter", () => {
+  const host = "app.example.test";
+  const config = (logDir: string) => ({
+    logging: { logs: { default: { writer: file("/logs/access.log") } } },
+    servers: servers({}),
+    logDir,
+    host,
+    limit: 50,
+  });
+  const lines = [
+    entry(host, { ts: 1000, uri: "/api/users?id=1", status: 200, clientIp: "203.0.113.1" }),
+    entry(host, { ts: 1100, uri: "/api/orders", status: 404, clientIp: "203.0.113.2" }),
+    entry(host, { ts: 1200, uri: "/static/app.js", status: 304, clientIp: "203.0.113.1" }),
+    entry(host, { ts: 1300, uri: "/api/login", status: 503, clientIp: "203.0.113.3" }),
+    entry(host, { ts: 1400, uri: "/", status: 500, clientIp: "203.0.113.1" }),
+  ];
+  const run = async (filter: object, extra: object = {}) => {
+    const logDir = await folder({ "access.log": lines.join("\n") + "\n" });
+    const result = await readHostLog({ ...config(logDir), ...extra, filter });
+    assert.ok(result.ok);
+    return result;
+  };
+
+  it("filters on a time range, inclusive at both ends", async () => {
+    assert.deepEqual((await run({ from: 1100_000, to: 1300_000 })).lines.map((l) => l.uri), ["/api/orders", "/static/app.js", "/api/login"]);
+    assert.deepEqual((await run({ from: 1350_000 })).lines.map((l) => l.uri), ["/"]);
+    assert.deepEqual((await run({ to: 1000_000 })).lines.map((l) => l.uri), ["/api/users?id=1"]);
+  });
+
+  it("filters on an exact status, a class, or several", async () => {
+    assert.deepEqual((await run({ status: [404] })).lines.map((l) => l.uri), ["/api/orders"]);
+    assert.deepEqual((await run({ status: ["5xx"] })).lines.map((l) => l.uri), ["/api/login", "/"]);
+    assert.deepEqual((await run({ status: ["3xx", 404] })).lines.map((l) => l.uri), ["/api/orders", "/static/app.js"]);
+  });
+
+  it("filters on a path prefix, ignoring the query string", async () => {
+    assert.deepEqual((await run({ pathPrefix: "/api" })).lines.map((l) => l.uri), ["/api/users?id=1", "/api/orders", "/api/login"]);
+    assert.deepEqual((await run({ pathPrefix: "/api/users" })).lines.map((l) => l.uri), ["/api/users?id=1"]);
+    assert.deepEqual((await run({ pathPrefix: "/id" })).lines, []);
+  });
+
+  it("filters on the client address", async () => {
+    assert.deepEqual((await run({ client: "203.0.113.1" })).lines.map((l) => l.uri), ["/api/users?id=1", "/static/app.js", "/"]);
+    assert.deepEqual((await run({ client: "203.0.113" })).lines, []);
+  });
+
+  it("combines filters and honours the limit with the newest matches", async () => {
+    assert.deepEqual((await run({ client: "203.0.113.1", status: ["2xx", "5xx"], from: 1100_000 })).lines.map((l) => l.uri), ["/"]);
+    assert.deepEqual((await run({ pathPrefix: "/api" }, { limit: 2 })).lines.map((l) => l.uri), ["/api/orders", "/api/login"]);
+    assert.equal((await run({ pathPrefix: "/api", status: [200] })).incomplete, false);
+  });
+
+  it("keeps lines of other hosts out even when they match", async () => {
+    const logDir = await folder({ "access.log": [entry("other.example.test", { uri: "/api" }), entry(host, { uri: "/api/mine" })].join("\n") + "\n" });
+    const result = await readHostLog({ ...config(logDir), filter: { pathPrefix: "/api" } });
+    assert.ok(result.ok);
+    assert.deepEqual(result.lines.map((l) => l.uri), ["/api/mine"]);
+  });
+
+  it("searches rotated files newest first for sparse matches", async () => {
+    const logDir = await folder({
+      "access.log": [entry(host, { uri: "/n1" }), entry(host, { uri: "/n2" })].join("\n") + "\n",
+      "access-2026-11-09T10-11-12.345.log": [entry(host, { uri: "/admin/a", ts: 10 }), entry(host, { uri: "/n3", ts: 11 })].join("\n") + "\n",
+      "access-2026-11-01T00-00-00.000.log": [entry(host, { uri: "/admin/b", ts: 5 }), entry(host, { uri: "/n4", ts: 6 })].join("\n") + "\n",
+    });
+    const all = await readHostLog({ ...config(logDir), filter: { pathPrefix: "/admin" } });
+    assert.ok(all.ok);
+    assert.deepEqual(all.lines.map((l) => l.uri), ["/admin/b", "/admin/a"]);
+    assert.equal(all.incomplete, false);
+    const one = await readHostLog({ ...config(logDir), limit: 1, filter: { pathPrefix: "/admin" } });
+    assert.ok(one.ok);
+    assert.deepEqual(one.lines.map((l) => l.uri), ["/admin/a"]);
+    assert.equal(one.incomplete, false);
+  });
+
+  it("stops at lines older than the time range, and says nothing is missing", async () => {
+    const logDir = await folder({
+      "access.log": [entry(host, { uri: "/new", ts: 2000 })].join("\n") + "\n",
+      "access-2026-11-09T10-11-12.345.log": [entry(host, { uri: "/old", ts: 100 })].join("\n") + "\n",
+    });
+    const result = await readHostLog({ ...config(logDir), filter: { from: 1000_000 } });
+    assert.ok(result.ok);
+    assert.deepEqual(result.lines.map((l) => l.uri), ["/new"]);
+    assert.equal(result.incomplete, false);
+  });
+});
+
+describe("the byte bound", () => {
+  const host = "app.example.test";
+  const filler = entry("noise.example.test", { uri: "/" + "x".repeat(200) });
+  const build = async () => {
+    const big = [entry(host, { uri: "/ancient" }), ...Array.from({ length: 5000 }, () => filler), entry(host, { uri: "/recent" })];
+    return folder({ "access.log": big.join("\n") + "\n" }); // about 1.3 MB
+  };
+  const config = (logDir: string) => ({
+    logging: { logs: { default: { writer: file("/logs/access.log") } } },
+    servers: servers({}),
+    logDir,
+    host,
+    limit: 10,
+  });
+
+  it("says the result may be incomplete when the bound is hit before the limit", async () => {
+    const logDir = await build();
+    const bounded = await readHostLog({ ...config(logDir), filter: { pathPrefix: "/" }, maxBytesPerFile: 64 * 1024 });
+    assert.ok(bounded.ok);
+    assert.deepEqual(bounded.lines.map((l) => l.uri), ["/recent"]);
+    assert.equal(bounded.incomplete, true);
+  });
+
+  it("reads further back when a filter is active than the unfiltered bound allows", async () => {
+    const logDir = await build();
+    const unfiltered = await readHostLog({ ...config(logDir), maxBytesPerFile: 64 * 1024 });
+    assert.ok(unfiltered.ok);
+    assert.equal(unfiltered.incomplete, true);
+    const filtered = await readHostLog({ ...config(logDir), filter: { pathPrefix: "/anc" } });
+    assert.ok(filtered.ok);
+    assert.deepEqual(filtered.lines.map((l) => l.uri), ["/ancient"]);
+    assert.equal(filtered.incomplete, false);
+  });
+
+  it("is not incomplete when the limit is reached or the whole file was read", async () => {
+    const logDir = await build();
+    const limited = await readHostLog({ ...config(logDir), limit: 1, maxBytesPerFile: 64 * 1024 });
+    assert.ok(limited.ok);
+    assert.equal(limited.incomplete, false);
+    const whole = await readHostLog({ ...config(logDir), maxBytesPerFile: 4 * 1024 * 1024 });
+    assert.ok(whole.ok);
+    assert.equal(whole.incomplete, false);
+  });
+
+  it("bounds the bytes over all files together", async () => {
+    const logDir = await folder({
+      "access.log": Array.from({ length: 300 }, () => filler).join("\n") + "\n",
+      "access-2026-11-09T10-11-12.345.log": entry(host, { uri: "/rotated" }) + "\n",
+    });
+    const result = await readHostLog({ ...config(logDir), filter: { pathPrefix: "/rot" }, maxBytesTotal: 32 * 1024 });
+    assert.ok(result.ok);
+    assert.deepEqual(result.lines, []);
+    assert.equal(result.incomplete, true);
+  });
+});
+
+describe("filter parsing", () => {
+  const from = (params: Record<string, string>) => parseHostLogFilter((name) => params[name]);
+
+  it("reads every part from query parameters", () => {
+    assert.deepEqual(from({ from: "10", to: "20", status: "404, 5XX", path: "/api", client: " 203.0.113.9 " }), {
+      ok: true,
+      filter: { from: 10, to: 20, status: [404, "5xx"], pathPrefix: "/api", client: "203.0.113.9" },
+    });
+    assert.deepEqual(from({}), { ok: true, filter: {} });
+  });
+
+  it("rejects values it cannot read", () => {
+    assert.equal(from({ from: "soon" }).ok, false);
+    assert.equal(from({ status: "ok" }).ok, false);
+  });
+
+  it("applies to followed lines the same way", () => {
+    const [line] = parseHostLines([entry("app.example.test", { uri: "/api/x", status: 500 })], "app.example.test");
+    assert.ok(matchesFilter(line, { status: ["5xx"], pathPrefix: "/api" }));
+    assert.ok(!matchesFilter(line, { status: ["2xx"] }));
+    assert.ok(matchesFilter(line, undefined));
   });
 });

@@ -13,11 +13,18 @@ const at = (pathname: string, search = "", hash = "") => resolveLocation({ pathn
 
 describe("resolveLocation", () => {
   it("shows each page at its own path without a redirect", () => {
-    for (const page of ["editor", "routes", "history", "events", "logs"]) {
+    for (const page of ["editor", "routes", "history", "events", "reviews", "logs"]) {
       const resolved = at(`/${page}`);
       assert.equal(resolved.page, page);
       assert.equal(resolved.redirect, null);
     }
+  });
+
+  it("reads the open Review on the Reviews page only", () => {
+    assert.deepEqual(parseParams("?review=12", "reviews"), { review: "12" });
+    assert.deepEqual(parseParams("?review=../x", "reviews"), {});
+    assert.deepEqual(parseParams("?review=12", "events"), {});
+    assert.equal(buildUrl("reviews", { review: "12" }), "/reviews?review=12");
   });
 
   it("ignores a trailing slash", () => {

@@ -7,9 +7,11 @@ import { readFile } from "node:fs/promises";
 import { DEFAULT_POLICY, type AlertPolicy } from "./alert-policy.js";
 import type { AlertPayload, AlertSender } from "./alerts.js";
 import { isNumber, isRecord, writeJsonAtomic } from "./json-file.js";
+import { reviewFailingMessage, reviewFoundMessage, reviewLink, type ReviewFailing, type ReviewFound } from "./review-alert.js";
+import type { Level } from "./review-result.js";
 
 export type StateName = "ok" | "warning" | "down";
-export type EventKind = "state" | "gap" | "removed" | "flapping" | "deploy_failed" | "external_edit" | "rollback";
+export type EventKind = "state" | "gap" | "removed" | "flapping" | "deploy_failed" | "external_edit" | "rollback" | "review_found" | "review_failed";
 export type Delivery = "sent" | "failed" | "pending";
 export type SubjectKind = "caddy" | "cert" | "upstream" | "host";
 
@@ -25,8 +27,19 @@ export interface EventRecord {
   /** End of a Gap, in ms. */
   until?: number;
   message: string;
+  /** For the Events about a Review: which one, and what it found. */
+  review?: EventReview;
   /** Present only when an Alert was due for this event. */
   delivery?: Delivery;
+}
+
+/** What an Event about a Review carries. Only `id` is always there; `review_found` fills in the rest. */
+export interface EventReview {
+  id: number;
+  level?: Level;
+  count?: number;
+  sites?: string[];
+  title?: string;
 }
 
 export type TimelineState = StateName | "unknown";
@@ -100,7 +113,7 @@ function withHosts(subject: string, message: string, hosts: string[] | undefined
 
 const severity: Record<StateName, number> = { ok: 0, warning: 1, down: 2 };
 const isState = (value: unknown): value is StateName => value === "ok" || value === "warning" || value === "down";
-const KINDS: EventKind[] = ["state", "gap", "removed", "flapping", "deploy_failed", "external_edit", "rollback"];
+const KINDS: EventKind[] = ["state", "gap", "removed", "flapping", "deploy_failed", "external_edit", "rollback", "review_found", "review_failed"];
 
 function validEvent(value: unknown): value is EventRecord {
   if (!isRecord(value)) return false;
@@ -110,6 +123,7 @@ function validEvent(value: unknown): value is EventRecord {
   if (value.state !== undefined && !isState(value.state)) return false;
   if (value.previous !== undefined && value.previous !== null && !isState(value.previous)) return false;
   if (value.until !== undefined && !isNumber(value.until)) return false;
+  if (value.review !== undefined && !(isRecord(value.review) && isNumber(value.review.id))) return false;
   return true;
 }
 
@@ -121,7 +135,7 @@ function validSubject(value: unknown): value is [string, SubjectState] {
 export type AlertScope = (subject: string, now: number) => { send: boolean; hosts?: string[] };
 
 /** What an Alert is about; whatever is left out shows as null in the message. */
-type AlertBase = Pick<AlertPayload, "event" | "message"> & Partial<Pick<AlertPayload, "subject" | "state" | "previous">> & { since: number };
+type AlertBase = Pick<AlertPayload, "event" | "message"> & Partial<Pick<AlertPayload, "subject" | "state" | "previous" | "level" | "link">> & { since: number };
 
 export interface EventTrackerOptions {
   /** `events.json`; without it nothing is persisted. */
@@ -248,6 +262,31 @@ export class EventTracker {
   record(kind: "deploy_failed" | "external_edit" | "rollback", message: string, now = this.clock()): EventRecord {
     const event = this.add({ at: now, kind, message });
     if (this.policy.triggers[kind]) this.alert(event, { event: kind, since: now, message });
+    return event;
+  }
+
+  /**
+   * A finished Review found something at or above the Owner's level; the caller has decided that (see `reviewFound`),
+   * so the Event is recorded whether or not ntfy is set up, and one Alert goes out when it is.
+   */
+  recordReviewFound(found: ReviewFound, now = this.clock()): EventRecord {
+    const message = reviewFoundMessage(found);
+    const review: EventReview = { id: found.reviewId, level: found.level, count: found.count, sites: found.sites, title: found.title };
+    const event = this.add({ at: now, kind: "review_found", message, review });
+    const link = this.publicUrl ? reviewLink(this.publicUrl, found.reviewId) : undefined;
+    this.alert(event, { event: "review_found", since: now, message, level: found.level, ...(link && { link }) });
+    return event;
+  }
+
+  /**
+   * Reviews failed twice in a row; the caller has decided that (see `alertOnFinished`). Recorded whether or not ntfy is set up;
+   * the Alert follows the Owner's switch for it.
+   */
+  recordReviewFailing(failing: ReviewFailing, now = this.clock()): EventRecord {
+    const message = reviewFailingMessage(failing);
+    const event = this.add({ at: now, kind: "review_failed", message, review: { id: failing.reviewId } });
+    const link = this.publicUrl ? reviewLink(this.publicUrl, failing.reviewId) : undefined;
+    if (this.policy.triggers.review_failed) this.alert(event, { event: "review_failed", since: now, message, ...(link && { link }) });
     return event;
   }
 
@@ -427,6 +466,7 @@ export class EventTracker {
       ...base,
       since: new Date(base.since).toISOString(),
       ...(this.publicUrl && { link: this.publicUrl }),
+      ...(base.link && { link: base.link }),
       ...(test && { test: true }),
     };
   }

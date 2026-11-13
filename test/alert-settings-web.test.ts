@@ -27,13 +27,13 @@ test("a number field rejects empty, fractional, negative and out-of-range input"
 })
 
 test("triggers are grouped in display order with their state", () => {
-  const keys: TriggerKey[] = ["caddy", "deploy_failed", "external_edit", "rollback", "recovery", "flapping"]
+  const keys: TriggerKey[] = ["caddy", "deploy_failed", "external_edit", "review_failed", "rollback", "recovery", "flapping"]
   const triggers = Object.fromEntries(keys.map((key) => [key, { value: key !== "rollback", overridden: key === "caddy" }])) as Record<TriggerKey, { value: boolean; overridden: boolean }>
   const groups = groupTriggers({ triggers })
   assert.deepEqual(groups.map((g) => g.title), ["Caddy and Fairway", "Messages"])
   assert.deepEqual(groups.flatMap((g) => g.items.map((i) => i.key)), keys)
   assert.equal(groups[0]!.items[0]!.overridden, true)
-  assert.equal(groups[0]!.items[3]!.value, false)
+  assert.equal(groups[0]!.items[4]!.value, false)
 })
 
 test("PUT bodies carry one change, and null resets", () => {

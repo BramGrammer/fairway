@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { SideDrawer } from "@/components/side-drawer"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useRouter } from "@/hooks/use-router"
 import { HostLogsTab } from "@/features/host-logs-tab"
 import { HostAlertsBlock } from "@/features/host-alerts"
 import { TimelineStrip } from "@/features/timeline-strip"
@@ -14,6 +15,7 @@ import {
   type DrawerTab,
   type NodeKind,
 } from "@/lib/route-drawer"
+import { filterFromParams } from "@/lib/host-log-query"
 import { hostFromLabel, requestShowInEditor } from "@/lib/show-in-editor"
 
 const KIND_LABELS: Record<NodeKind, string> = {
@@ -35,7 +37,10 @@ interface RouteDrawerProps {
 /** The details of one node of the Routes page, in a drawer over the right edge. */
 export function RouteDrawer({ name, kind, overview, onClose }: RouteDrawerProps) {
   // Kept here so the choice survives moving to another host; kinds without the tab show the overview.
-  const [selectedTab, setSelectedTab] = useState<DrawerTab>("overview")
+  // A link can open the drawer on the Logs tab, with the filter its URL carries; that is read once, here.
+  const { params } = useRouter()
+  const [selectedTab, setSelectedTab] = useState<DrawerTab>(params.tab === "logs" ? "logs" : "overview")
+  const [initialFilter] = useState(() => filterFromParams(params))
   const tabs = drawerTabs(kind)
   const tab = activeTab(kind, selectedTab)
 
@@ -84,7 +89,7 @@ export function RouteDrawer({ name, kind, overview, onClose }: RouteDrawerProps)
           <HostAlertsBlock host={name} />
         </div>
       )}
-      {tab === "logs" ? <HostLogsTab host={hostFromLabel(name)} /> : overview}
+      {tab === "logs" ? <HostLogsTab host={hostFromLabel(name)} initial={initialFilter} /> : overview}
     </SideDrawer>
   )
 }

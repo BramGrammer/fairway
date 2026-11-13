@@ -17,7 +17,7 @@ The Assistant is an AI chat beside the editor. It can answer questions about the
 - **Secrets are masked on the way out.** The Caddyfile goes to an outside provider, so values Fairway recognises as secrets (provider tokens, password hashes, keys in headers) are replaced by stable placeholders before sending and put back in the Proposal. Masking only knows the directives it was taught, so a Finding also flags secrets written inline and points at `{env.X}`. Stored Conversations hold the masked text.
 - **Conversations are kept for 30 days** in `DATA_DIR`, like the Event history.
 - **A login is required.** Without one, anyone who can reach the page could spend the Owner's credit and read Conversations, so the Assistant is off, as in [ADR 0007](0007-alert-settings-from-the-interface-over-the-environment.md) for where Alerts go.
-- Each turn has a hard limit on tool calls and tokens, and its usage is recorded.
+- Each turn is bounded: a cap on the tokens of each model answer, a limit on tool calls and on failed Validations, and a limit on the size of the Conversation sent. Usage is recorded and shown; there is no total token budget.
 
 ## Considered
 

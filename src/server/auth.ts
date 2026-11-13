@@ -241,7 +241,7 @@ function decode(key: Buffer, value: string | undefined, now: number): Session | 
   return session;
 }
 
-async function loadSecret(dataDir: string): Promise<Buffer> {
+export async function loadSecret(dataDir: string): Promise<Buffer> {
   const file = join(dataDir, "auth-secret");
   await mkdir(dataDir, { recursive: true });
   try {

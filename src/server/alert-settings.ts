@@ -5,7 +5,7 @@
 
 import { createHash, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { DEFAULT_POLICY, TIMING_KEYS, TIMING_LIMITS, TRIGGER_KEYS, type AlertPolicy, type TimingKey, type TriggerKey } from "./alert-policy.js";
+import { DEFAULT_POLICY, REVIEW_LEVELS, TIMING_KEYS, TIMING_LIMITS, TRIGGER_KEYS, type AlertPolicy, type ReviewLevel, type TimingKey, type TriggerKey } from "./alert-policy.js";
 import { NtfySender, type NtfyTarget } from "./alerts.js";
 import { subjectKind, subjectName, type AlertScope } from "./events.js";
 import { isRecord, writeJsonAtomic } from "./json-file.js";
@@ -57,6 +57,7 @@ interface SavedSettings {
   hosts: Array<[string, HostAlerts]>;
   triggers: Partial<Record<TriggerKey, boolean>>;
   timing: Partial<Record<TimingKey, number>>;
+  reviewLevel?: ReviewLevel;
 }
 
 /** What the environment provides. */
@@ -85,6 +86,8 @@ export interface SettingsView {
   topics: Array<{ id: string; name: string; source: "env" | "saved"; enabled: boolean; hasToken: boolean; host?: string }>;
   publicUrl: { value: string | null; envDefault: string | null; overridden: boolean };
   triggers: Record<TriggerKey, { value: boolean; overridden: boolean }>;
+  /** Which Reviews send an Alert: those with an Observation at or above this level. */
+  reviewLevel: { value: ReviewLevel; default: ReviewLevel; overridden: boolean };
   timing: Record<TimingKey, { value: number; default: number; overridden: boolean; min: number; max: number }>;
   /** Only hosts the Owner has set something for; every other host sends no Alerts. */
   hosts: Record<string, { enabled: boolean; kinds: Record<HostKind, boolean>; snoozedUntil: number | null }>;
@@ -95,6 +98,8 @@ export type Result<T = object> = ({ ok: true } & T) | { ok: false; error: string
 export interface Patch {
   triggers?: Partial<Record<TriggerKey, boolean | null>>;
   timing?: Partial<Record<TimingKey, number | null>>;
+  /** A level overrides the default; null goes back to it. */
+  reviewLevel?: ReviewLevel | null;
   /** A string overrides, the empty string means no link, null goes back to the environment's. */
   publicUrl?: string | null;
   /** A host's alert settings; null forgets the host. */
@@ -186,6 +191,7 @@ export class AlertSettings {
       }
     }
     if (isRecord(data.triggers)) for (const key of TRIGGER_KEYS) if (typeof data.triggers[key] === "boolean") next.triggers[key] = data.triggers[key];
+    if ((REVIEW_LEVELS as readonly unknown[]).includes(data.reviewLevel)) next.reviewLevel = data.reviewLevel as ReviewLevel;
     if (isRecord(data.timing)) {
       for (const key of TIMING_KEYS) {
         const value = data.timing[key];
@@ -214,6 +220,7 @@ export class AlertSettings {
     const policy: AlertPolicy = {
       ...DEFAULT_POLICY,
       triggers: { ...DEFAULT_POLICY.triggers, ...this.saved.triggers },
+      ...(this.saved.reviewLevel !== undefined && { reviewLevel: this.saved.reviewLevel }),
       ...this.saved.timing,
     };
     const publicUrl = this.saved.publicUrl !== undefined ? this.saved.publicUrl || null : this.env.publicUrl;
@@ -241,6 +248,7 @@ export class AlertSettings {
       })),
       publicUrl: { value: publicUrl, envDefault: this.env.publicUrl, overridden: this.saved.publicUrl !== undefined },
       triggers,
+      reviewLevel: { value: policy.reviewLevel, default: DEFAULT_POLICY.reviewLevel, overridden: this.saved.reviewLevel !== undefined },
       timing,
     };
   }
@@ -264,6 +272,11 @@ export class AlertSettings {
       if (value === null) delete next.triggers[key as TriggerKey];
       else if (typeof value === "boolean") next.triggers[key as TriggerKey] = value;
       else return { ok: false, error: `${key} must be true, false or null.` };
+    }
+    if (patch.reviewLevel !== undefined) {
+      if (patch.reviewLevel === null) delete next.reviewLevel;
+      else if ((REVIEW_LEVELS as readonly unknown[]).includes(patch.reviewLevel)) next.reviewLevel = patch.reviewLevel;
+      else return { ok: false, error: `reviewLevel must be one of ${REVIEW_LEVELS.join(", ")}, or null.` };
     }
     for (const [key, value] of Object.entries(patch.timing ?? {})) {
       if (!(TIMING_KEYS as string[]).includes(key)) return { ok: false, error: `Unknown setting: ${key}` };

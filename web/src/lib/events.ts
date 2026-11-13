@@ -1,6 +1,15 @@
 export type StateName = "ok" | "warning" | "down"
-export type EventKind = "state" | "gap" | "removed" | "flapping" | "deploy_failed" | "external_edit" | "rollback"
+export type EventKind = "state" | "gap" | "removed" | "flapping" | "deploy_failed" | "external_edit" | "rollback" | "review_found" | "review_failed"
 export type Delivery = "sent" | "failed" | "pending"
+
+/** What an Event about a Review carries; the Review it links to is `id`. */
+export interface EventReview {
+  id: number
+  level?: "info" | "notable" | "urgent"
+  count?: number
+  sites?: string[]
+  title?: string
+}
 
 export interface EventRecord {
   id: number
@@ -14,6 +23,7 @@ export interface EventRecord {
   /** End of a gap, in ms. */
   until?: number
   message: string
+  review?: EventReview
   delivery?: Delivery
 }
 

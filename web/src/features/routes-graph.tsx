@@ -34,7 +34,7 @@ import { useTlsStatus } from "@/hooks/use-tls-status"
 import { groupBadge, hostBadge } from "@/lib/tls-badges"
 import { upstreamHealth, worstHealth } from "@/lib/upstream-health"
 import type { Chip, Destination, HostStats, Site } from "@/lib/api"
-import { nodeKind } from "@/lib/route-drawer"
+import { nodeKind, siteNodeId } from "@/lib/route-drawer"
 import { PANEL_ROWS, PANEL_ROW_H, panelRows, splitMembers } from "@/lib/group-panel"
 import { securityOf } from "@/lib/tls-config"
 import { stepHeight } from "@/lib/middleware-node"
@@ -139,13 +139,16 @@ function uniqueChips(chips: Chip[]): Chip[] {
   })
 }
 
+/** The parameters that set up the Logs tab of the open drawer. */
+const LOG_PARAMS = ["tab", "client", "path", "status", "range"] as const
+
 const stepId = (chip: Chip) => `mw:${chip.label}`
 
 /** Every route as a path: host -> the middleware stack it passes through -> where it ends up. */
 function buildRaw(sites: Site[]): Raw {
   const raw: Raw = { hosts: new Map(), handlers: new Map(), steps: new Map(), dests: new Map(), paths: [] }
   for (const site of sites) {
-    const hostId = `host:${site.hosts.join(",")}|${site.listen.join(",")}`
+    const hostId = siteNodeId(site)
     raw.hosts.set(hostId, { id: hostId, site, routes: site.rules.length })
 
     for (const rule of site.rules) {
@@ -584,9 +587,10 @@ export function RoutesGraph({ sites, query = "" }: { sites: Site[]; query?: stri
       : null
   /** Opening the drawer pushes a history entry, so Back closes it; moving to another node replaces. */
   const setPinned = (id: string | null) => {
-    if (id === null) closePanel(["node"])
+    if (id === null) closePanel(["node", ...LOG_PARAMS])
+    // The Logs tab's starting point belongs to the node a link opened; another node starts fresh.
     else if (nodeParam === undefined) openPanel({ node: id })
-    else if (id !== nodeParam) replaceParams({ node: id })
+    else if (id !== nodeParam) replaceParams({ node: id, tab: undefined, client: undefined, path: undefined, status: undefined, range: undefined })
   }
   /** Open groups that show every member instead of folding the rest into a "more" row. */
   const [showAll, setShowAll] = useState<Set<string>>(() => new Set())

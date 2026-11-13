@@ -5,7 +5,7 @@ export const EVENT_COLUMN_IDS = ["time", "type", "name", "status", "alert"] as c
 export type EventColumnId = (typeof EVENT_COLUMN_IDS)[number]
 
 /** What an event is about: a kind of Subject, or one of the one-shot occurrences. */
-export type EventType = "caddy" | "host" | "cert" | "upstream" | "deploy" | "edit" | "rollback" | "fairway"
+export type EventType = "caddy" | "host" | "cert" | "upstream" | "deploy" | "edit" | "rollback" | "review" | "fairway"
 
 export const TYPE_LABELS: Record<EventType, string> = {
   caddy: "Caddy",
@@ -15,6 +15,7 @@ export const TYPE_LABELS: Record<EventType, string> = {
   deploy: "Deploy",
   edit: "Outside edit",
   rollback: "Rollback",
+  review: "Review",
   fairway: "Fairway",
 }
 
@@ -28,6 +29,9 @@ export function eventType(event: Pick<EventRecord, "kind" | "subject">): EventTy
       return "edit"
     case "rollback":
       return "rollback"
+    case "review_found":
+    case "review_failed":
+      return "review"
     case "gap":
       return "fairway"
   }
@@ -36,7 +40,8 @@ export function eventType(event: Pick<EventRecord, "kind" | "subject">): EventTy
 }
 
 /** The name of the Subject without its kind: a host, a certificate's host, an upstream's address. Empty when there is none. */
-export function eventName(event: Pick<EventRecord, "subject">): string {
+export function eventName(event: Pick<EventRecord, "subject"> & { review?: { id: number } }): string {
+  if (event.review) return `Review ${event.review.id}`
   const subject = event.subject ?? ""
   const at = subject.indexOf(":")
   return at === -1 ? "" : subject.slice(at + 1)

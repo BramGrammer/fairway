@@ -6,6 +6,7 @@
 
 import type { Finding } from "./findings.js";
 import { resolveLogger } from "./host-logs.js";
+import { findSecrets, type SecretKind } from "./secrets.js";
 import { siteLine } from "./site-blocks.js";
 
 type Obj = Record<string, unknown>;
@@ -139,5 +140,23 @@ export function runRules(config: unknown, text: string): Finding[] {
     );
   }
 
+  // 5. A secret written in the Caddyfile itself. The message never repeats the value.
+  for (const secret of findSecrets(text)) {
+    findings.push(warning(secretMessage(secret.kind, secret.label), secret.line));
+  }
+
   return findings;
+}
+
+const SECRET_HINT = "Keep it out of the file with a placeholder such as {env.NAME} and set the variable in Caddy's environment.";
+
+function secretMessage(kind: SecretKind, label?: string): string {
+  switch (kind) {
+    case "dns-credential":
+      return `A DNS provider credential${label ? ` (${label})` : ""} is written in the Caddyfile. ${SECRET_HINT}`;
+    case "password-hash":
+      return `A basic_auth password hash is written in the Caddyfile. ${SECRET_HINT}`;
+    case "header-credential":
+      return `The ${label ?? "header"} header carries a credential written in the Caddyfile. ${SECRET_HINT}`;
+  }
 }
