@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.0](https://github.com/BramGrammer/fairway/compare/v0.6.0...v0.7.0) (2026-11-14)
+
+
+### Features
+
+* let the Assistant look at a Site's routes and Access log ([b3c5d33](https://github.com/BramGrammer/fairway/commit/b3c5d33bbeaf4e873d6fd69216340f00712f974a))
+
+
+### Bug Fixes
+
+* make Reviews cheaper and more reliable ([e03bc45](https://github.com/BramGrammer/fairway/commit/e03bc45f7ffe72c31cfb461887bd92ccbb6150f3))
+
 ## [0.6.0](https://github.com/BramGrammer/fairway/compare/v0.5.0...v0.6.0) (2026-11-13)
 
 
