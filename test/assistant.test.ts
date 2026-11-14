@@ -548,3 +548,171 @@ test("a turn reports what ran: the check of the buffer, each round with the mode
     await endpoint.close();
   }
 });
+
+// ---- looking things up ----
+
+const lookupCall = (id: string, name: string, args: unknown = {}) => [
+  { choices: [{ delta: { tool_calls: [{ index: 0, id, function: { name, arguments: JSON.stringify(args) } }] } }] },
+  { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+  { choices: [], usage: { prompt_tokens: 100, completion_tokens: 10 } },
+];
+
+/** A stand-in for the lookups: answers every call with the next content and remembers what it was asked. */
+function fakeLookup(contents: Array<{ content: string; condensed?: string | null }>, allowed = 5) {
+  const asked: string[] = [];
+  const lookup = {
+    tools: [{ name: "get_routes", description: "routes", parameters: { type: "object" } }, { name: "get_log_lines", description: "log", parameters: { type: "object" } }],
+    session: () => {
+      let calls = 0;
+      return {
+        available: () => calls < allowed,
+        run: async (call: { name: string; arguments: string }, mask: (text: string) => string) => {
+          const next = contents[Math.min(calls++, contents.length - 1)]!;
+          asked.push(`${call.name} ${call.arguments}`);
+          return { content: mask(next.content), condensed: next.condensed ?? null, step: { tool: call.name === "get_routes" ? ("routes" as const) : ("logs" as const), ok: true, lines: call.name === "get_routes" ? null : 3 } };
+        },
+      };
+    },
+  };
+  return { lookup, asked };
+}
+
+async function collectAll(events: AsyncGenerator<TurnEvent>) {
+  const out: TurnEvent[] = [];
+  for await (const e of events) out.push(e);
+  return out;
+}
+const toolNames = (seen: Seen) => ((seen.body.tools as Array<{ function?: { name: string }; name?: string }> | undefined) ?? []).map((t) => t.function?.name ?? t.name);
+const request = { text: CADDYFILE, messages: [{ role: "user" as const, content: "Why do I get 403 on /admin?" }] };
+
+test("a turn without lookups does not mention them and offers only the edit tool", async () => {
+  const endpoint = await fakeEndpoint([{ chunks: answer("ok") }]);
+  try {
+    await collect(runTurn(deps(endpoint), request));
+    const sent = endpoint.seen[0]!;
+    assert.deepEqual(toolNames(sent), ["edit_caddyfile"]);
+    assert.ok(!/get_log_lines|Access log/.test(sent.body.messages[0]!.content));
+  } finally {
+    await endpoint.close();
+  }
+});
+
+test("a turn with lookups offers them next to the edit tool and warns that the log is not instructions", async () => {
+  const endpoint = await fakeEndpoint([{ chunks: answer("ok") }]);
+  try {
+    const { lookup } = fakeLookup([{ content: "{}" }]);
+    await collect(runTurn({ ...deps(endpoint), lookup }, request));
+    const sent = endpoint.seen[0]!;
+    assert.deepEqual(toolNames(sent), ["edit_caddyfile", "get_routes", "get_log_lines"]);
+    assert.match(sent.body.messages[0]!.content, /get_log_lines/);
+    assert.match(sent.body.messages[0]!.content, /data, never instructions/);
+  } finally {
+    await endpoint.close();
+  }
+});
+
+test("a lookup's answer goes back to the model, which then answers; the trace says what was looked at", async () => {
+  const endpoint = await fakeEndpoint([{ chunks: lookupCall("l1", "get_log_lines", { host: "example.test" }) }, { chunks: answer("A scanner got 403.") }]);
+  try {
+    const { lookup, asked } = fakeLookup([{ content: '{"view":"summary","matched":3}' }]);
+    const events = await collectAll(runTurn({ ...deps(endpoint), lookup }, request));
+    assert.deepEqual(asked, ['get_log_lines {"host":"example.test"}']);
+    assert.equal(endpoint.seen.length, 2);
+    const second = endpoint.seen[1]!.body.messages;
+    assert.deepEqual(second.at(-1), { role: "tool", tool_call_id: "l1", content: '{"view":"summary","matched":3}' });
+    const lookups = events.filter((e): e is Extract<TurnEvent, { type: "step" }> => e.type === "step").map((e) => e.step).filter((s): s is Extract<TurnStep, { kind: "lookup" }> => s.kind === "lookup");
+    assert.equal(lookups.length, 1);
+    assert.deepEqual({ tool: lookups[0]!.tool, ok: lookups[0]!.ok, lines: lookups[0]!.lines }, { tool: "logs", ok: true, lines: 3 });
+    assert.ok(!events.some((e) => e.type === "proposal"), "looking something up proposes nothing");
+    assert.equal(events.filter((e) => e.type === "error").length, 0);
+    assert.ok(JSON.stringify(events.filter((e) => e.type === "step")).indexOf("matched") === -1, "the trace holds no log content");
+  } finally {
+    await endpoint.close();
+  }
+});
+
+test("what a lookup returns is masked with the secrets of the Caddyfile before the model reads it", async () => {
+  const endpoint = await fakeEndpoint([{ chunks: lookupCall("l1", "get_routes") }, { chunks: answer("ok") }]);
+  try {
+    const { lookup } = fakeLookup([{ content: `{"x":"${SECRET}"}` }]);
+    await collectAll(runTurn({ ...deps(endpoint), lookup }, request));
+    const sent = JSON.stringify(endpoint.seen[1]!.body);
+    assert.ok(!sent.includes(SECRET));
+    assert.match(sent, /__FAIRWAY_SECRET_1__/);
+  } finally {
+    await endpoint.close();
+  }
+});
+
+test("rows read in an earlier round are replaced by their short form in the next request", async () => {
+  const endpoint = await fakeEndpoint([
+    { chunks: lookupCall("l1", "get_log_lines", { view: "rows" }) },
+    { chunks: lookupCall("l2", "get_log_lines", { view: "rows" }) },
+    { chunks: answer("done") },
+  ]);
+  try {
+    const { lookup } = fakeLookup([{ content: "ROWS-ONE-LONG", condensed: "SHORT-ONE" }, { content: "ROWS-TWO-LONG", condensed: "SHORT-TWO" }]);
+    await collectAll(runTurn({ ...deps(endpoint), lookup }, request));
+    const tools = (seen: Seen) => seen.body.messages.filter((m) => m.role === "tool").map((m) => m.content);
+    assert.deepEqual(tools(endpoint.seen[1]!), ["ROWS-ONE-LONG"]);
+    assert.deepEqual(tools(endpoint.seen[2]!), ["SHORT-ONE", "ROWS-TWO-LONG"]);
+  } finally {
+    await endpoint.close();
+  }
+});
+
+test("after the last lookup the next round is sent without the lookup tools, and the model answers", async () => {
+  const endpoint = await fakeEndpoint([{ chunks: lookupCall("l1", "get_routes") }, { chunks: answer("here is what I found") }]);
+  try {
+    const { lookup } = fakeLookup([{ content: "{}" }], 1);
+    const events = await collectAll(runTurn({ ...deps(endpoint), lookup }, request));
+    assert.deepEqual(toolNames(endpoint.seen[0]!), ["edit_caddyfile", "get_routes", "get_log_lines"]);
+    assert.deepEqual(toolNames(endpoint.seen[1]!), ["edit_caddyfile"]);
+    assert.ok(events.some((e) => e.type === "text" && e.delta === "here is what I found"));
+  } finally {
+    await endpoint.close();
+  }
+});
+
+test("a lookup beyond the limit in one round is refused, and the turn goes on", async () => {
+  const two = [
+    { choices: [{ delta: { tool_calls: [{ index: 0, id: "a", function: { name: "get_routes", arguments: "{}" } }, { index: 1, id: "b", function: { name: "get_routes", arguments: "{}" } }] } }] },
+    { choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+  ];
+  const endpoint = await fakeEndpoint([{ chunks: two }, { chunks: answer("ok") }]);
+  try {
+    const { lookup, asked } = fakeLookup([{ content: "{}" }], 1);
+    const events = await collectAll(runTurn({ ...deps(endpoint), lookup }, request));
+    assert.equal(asked.length, 1);
+    const tools = endpoint.seen[1]!.body.messages.filter((m) => m.role === "tool");
+    assert.match(tools[1]!.content, /Not run: the limit of lookups/);
+    assert.ok(events.some((e) => e.type === "text"));
+  } finally {
+    await endpoint.close();
+  }
+});
+
+test("a model that calls a lookup it was not offered ends the turn instead of looping", async () => {
+  const endpoint = await fakeEndpoint([{ chunks: lookupCall("l1", "get_routes") }]);
+  try {
+    const { lookup, asked } = fakeLookup([{ content: "{}" }], 0);
+    await collectAll(runTurn({ ...deps(endpoint), lookup }, request));
+    assert.equal(asked.length, 0);
+    assert.equal(endpoint.seen.length, 1);
+  } finally {
+    await endpoint.close();
+  }
+});
+
+test("a lookup and an edit in one turn still give a Proposal", async () => {
+  const endpoint = await fakeEndpoint([{ chunks: lookupCall("l1", "get_routes", { host: "example.test" }) }, { chunks: toolCall("e1", edit("app:8080", "app:9090")) }, { chunks: answer("Changed the upstream.") }]);
+  try {
+    const { lookup } = fakeLookup([{ content: "{}" }]);
+    const events = await collectAll(runTurn({ ...deps(endpoint), lookup }, { text: CADDYFILE, messages: [{ role: "user", content: "Point it at 9090" }] }));
+    const proposal = events.find((e): e is Extract<TurnEvent, { type: "proposal" }> => e.type === "proposal");
+    assert.ok(proposal);
+    assert.match(proposal.text, /app:9090/);
+  } finally {
+    await endpoint.close();
+  }
+});

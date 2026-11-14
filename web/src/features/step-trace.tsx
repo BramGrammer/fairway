@@ -3,6 +3,7 @@ import {
   CheckIcon,
   CircleAlertIcon,
   PencilIcon,
+  SearchIcon,
   SparklesIcon,
   TriangleAlertIcon,
 } from "lucide-react"
@@ -76,6 +77,20 @@ function describeStep(step: TurnStep): {
             title: "An edit did not apply to the draft",
             error: true,
           }
+    case "lookup":
+      return {
+        icon: step.ok ? <SearchIcon /> : <CircleAlertIcon />,
+        title: !step.ok
+          ? `A look at the ${step.tool === "routes" ? "routes" : "Access log"} did not work`
+          : step.tool === "routes"
+            ? "Looked at the running routes"
+            : "Looked at the Access log",
+        detail:
+          step.ok && step.tool === "logs" && step.lines !== null
+            ? `${plural(step.lines, "line")} · ${formatDuration(step.ms)}`
+            : formatDuration(step.ms),
+        error: !step.ok,
+      }
     case "validate":
       return {
         icon: step.errors > 0 ? <CircleAlertIcon /> : <CheckIcon />,

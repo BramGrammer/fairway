@@ -152,8 +152,15 @@ export type TurnStep =
       errors: number
       warnings: number
     }
+  | {
+      kind: "lookup"
+      tool: "routes" | "logs"
+      ms: number
+      ok: boolean
+      lines: number | null
+    }
 
-const TURN_STEP_KINDS = ["checked", "model", "edit", "validate"]
+const TURN_STEP_KINDS = ["checked", "model", "edit", "validate", "lookup"]
 
 /** A duration for the trace: milliseconds below a second, then seconds with a decimal, then minutes. */
 export function formatDuration(ms: number): string {
@@ -186,7 +193,7 @@ export const CONTEXT_LABELS: Record<ContextKey, string> = {
   findings: "Findings",
   proposal: "Pending Proposal",
   placeholders: "Secret placeholders",
-  tool: "Edit tool",
+  tool: "Tools",
 }
 
 /** What a Conversation has cost at the Owner's prices, in dollars per million tokens. */
