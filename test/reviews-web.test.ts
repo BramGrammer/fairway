@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { countByLevel, evidenceLine, groupByLevel, parsePersistedReviews, nextReviewLabel, reviewFixPrompt, reviewsAvailable, totalTokens, type Observation, type Review, type ReviewSchedule } from "../web/src/lib/reviews.js";
+import { countByLevel, evidenceLine, groupByLevel, groupUnseen, linesRequestedLabel, retentionNotice, parsePersistedReviews, nextReviewLabel, reviewFixPrompt, reviewsAvailable, totalTokens, type Observation, type Review, type ReviewSchedule } from "../web/src/lib/reviews.js";
 
 const observation = (level: Observation["level"], title = "t"): Observation => ({ level, sites: ["a.example.test"], title, explanation: "e", evidence: [] });
 
@@ -82,5 +82,34 @@ describe("asking the Assistant to fix what a Review found", () => {
     assert.equal(reviewFixPrompt(review({ observations: [] })), null);
     const many = Array.from({ length: 200 }, (_, i) => observation("notable", `finding ${i}`));
     assert.ok(reviewFixPrompt(review({ observations: many }))!.length <= 6000);
+  });
+});
+
+describe("what could not be seen", () => {
+  it("groups Sites with the same unseen part", () => {
+    const part = (site: string, from: number, to: number, reason: "rotated-away" | "size-limit" = "rotated-away") => ({ site, from, to, reason, file: "web.log" });
+    const groups = groupUnseen([part("a.example.test", 1, 5), part("b.example.test", 1, 5), part("c.example.test", 1, 6), part("d.example.test", 1, 5, "size-limit")]);
+    assert.deepEqual(groups.map((g) => g.sites), [["a.example.test", "b.example.test"], ["c.example.test"], ["d.example.test"]]);
+  });
+
+  const HOUR = 3_600_000;
+  const review = (retainedMs: number | undefined, hours = 25) => ({ period: { from: 0, to: hours * HOUR }, coverage: { retainedMs } });
+
+  it("says how little Caddy kept, against what the Review covered", () => {
+    assert.equal(retentionNotice(review(8.4 * HOUR)), "Caddy kept only about 8 hours of log, but this Review covered 25 hours. Run Reviews more often than that, or let Caddy keep more log files.");
+  });
+
+  it("says nothing when Caddy kept enough, or nothing was rotated away", () => {
+    assert.equal(retentionNotice(review(undefined)), null);
+    assert.equal(retentionNotice(review(24.8 * HOUR)), null);
+  });
+});
+
+describe("the lines a Review looked at", () => {
+  const request = { host: "a.example.test", from: 0, to: 1, client: "203.0.113.9", limit: 20 };
+  it("tells a summary from rows, and older Reviews count as rows", () => {
+    assert.match(linesRequestedLabel({ request: { ...request, view: "summary" }, rows: 1 }), /: summary of 1 line$/);
+    assert.match(linesRequestedLabel({ request: { ...request, view: "rows" }, rows: 3 }), /: 3 rows$/);
+    assert.match(linesRequestedLabel({ request, rows: 100 }), /: 100 rows$/);
   });
 });

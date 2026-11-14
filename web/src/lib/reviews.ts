@@ -39,7 +39,7 @@ export interface UnseenPart {
 }
 
 export interface LinesRequested {
-  request: { host: string; from: number; to: number; status?: Array<number | string>; pathPrefix?: string; client?: string; limit: number }
+  request: { host: string; from: number; to: number; status?: Array<number | string>; pathPrefix?: string; client?: string; limit: number; view?: "summary" | "rows" }
   rows: number
 }
 
@@ -50,6 +50,7 @@ export function linesRequestedLabel({ request, rows }: LinesRequested): string {
   if (request.status?.length) parts.push(`status ${request.status.join(", ")}`)
   if (request.pathPrefix) parts.push(`path ${request.pathPrefix}`)
   if (request.client) parts.push(`client ${request.client}`)
+  if (request.view === "summary") return `${parts.join(", ")}: summary of ${rows} ${rows === 1 ? "line" : "lines"}`
   return `${parts.join(", ")}: ${rows} ${rows === 1 ? "row" : "rows"}`
 }
 
@@ -69,6 +70,8 @@ export interface Review {
     skipped: Array<{ site: string; hosts: string[]; reason: SkipReason }>
     /** Time before the period that no Review covered. Absent in older Reviews. */
     gaps?: Array<{ from: number; to: number; reason: "no-review" }>
+    /** How much of the period's end Caddy still had lines for, at the Site that kept the least. Absent when nothing was rotated away. */
+    retainedMs?: number
   }
   /** The requests for log lines the model made; absent on Reviews stored before this existed. */
   linesRequested?: LinesRequested[]
@@ -142,6 +145,33 @@ export const UNSEEN_REASONS: Record<UnseenReason, string> = {
   "rotated-away": "Caddy had already rotated these lines away",
   "size-limit": "Reading stopped at the size limit",
   "read-error": "A log file could not be read to its end",
+}
+
+/** Several Sites with the same part of the period unseen for the same reason, as one entry. */
+export function groupUnseen<T extends { site: string; from: number; to: number; reason: UnseenReason }>(parts: T[]): Array<{ sites: string[]; from: number; to: number; reason: UnseenReason }> {
+  const groups = new Map<string, { sites: string[]; from: number; to: number; reason: UnseenReason }>()
+  for (const part of parts) {
+    const key = `${part.reason}|${part.from}|${part.to}`
+    const group = groups.get(key)
+    if (group) group.sites.push(part.site)
+    else groups.set(key, { sites: [part.site], from: part.from, to: part.to, reason: part.reason })
+  }
+  return [...groups.values()]
+}
+
+/**
+ * A notice when Caddy kept clearly less of the log than the Review covered: "Caddy kept about 8 hours of log, but this
+ * Review covered 25 hours." Null when it kept enough, or nothing was rotated away. The margin keeps a few minutes' gap quiet.
+ */
+export function retentionNotice(review: { period: { from: number; to: number }; coverage: { retainedMs?: number } }): string | null {
+  const retained = review.coverage.retainedMs
+  const covered = review.period.to - review.period.from
+  if (retained === undefined || retained >= covered - 30 * 60_000) return null
+  const hours = (ms: number) => {
+    const value = Math.max(1, Math.round(ms / 3_600_000))
+    return `${value} ${value === 1 ? "hour" : "hours"}`
+  }
+  return `Caddy kept only about ${hours(retained)} of log, but this Review covered ${hours(covered)}. Run Reviews more often than that, or let Caddy keep more log files.`
 }
 
 export const SKIP_REASONS: Record<SkipReason, string> = {

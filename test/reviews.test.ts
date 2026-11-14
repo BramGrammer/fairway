@@ -36,9 +36,9 @@ const GOOD = {
 
 let clock = NOW;
 
-async function rig(options: { answer?: () => Response | Promise<Response>; loginRequired?: boolean; model?: string | null; live?: boolean } = {}) {
+async function rig(options: { answer?: () => Response | Promise<Response>; loginRequired?: boolean; model?: string | null; live?: boolean; lines?: string[] } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "ce-reviews-"));
-  await writeFile(join(dir, "web.log"), [entry(T0 + 10 * 60_000, 404, "/.env?token=secret", "203.0.113.9"), entry(T0 + 11 * 60_000, 404, "/admin", "203.0.113.9"), entry(T0 + HOUR, 200, "/", "198.51.100.1")].join("\n") + "\n");
+  await writeFile(join(dir, "web.log"), (options.lines ?? [entry(T0 + 10 * 60_000, 404, "/.env?token=secret", "203.0.113.9"), entry(T0 + 11 * 60_000, 404, "/admin", "203.0.113.9"), entry(T0 + HOUR, 200, "/", "198.51.100.1")]).join("\n") + "\n");
   const requests: Array<{ url: string; authorization: string | null; body: any }> = [];
   const fetchImpl = (async (url: string, init: RequestInit) => {
     requests.push({ url, authorization: (init.headers as Record<string, string>).Authorization ?? null, body: JSON.parse(String(init.body)) });
@@ -261,7 +261,7 @@ describe("a Review that asks for log lines", () => {
   const toolMessages = (request: any) => request.body.messages.filter((m: any) => m.role === "tool");
 
   it("sends the redacted rows back, records the request and finishes with the report", async () => {
-    const r = await rig({ answer: script(() => linesAnswer({ host: "app.example.test", client: "203.0.113.9" }), () => sse(...toolAnswer(GOOD))) });
+    const r = await rig({ answer: script(() => linesAnswer({ host: "app.example.test", client: "203.0.113.9", view: "rows" }), () => sse(...toolAnswer(GOOD))) });
     await r.reviews.start();
     await r.reviews.idle();
     const review = r.reviews.list()[0];
@@ -323,6 +323,167 @@ describe("a Review that asks for log lines", () => {
     await r.reviews.start();
     await r.reviews.idle();
     assert.match(r.requests[0].body.messages[0].content, new RegExp(LINES_TOOL));
+  });
+});
+
+describe("a Review whose answer is not usable the first time", () => {
+  const script = (...answers: Array<() => Response>) => {
+    let n = 0;
+    return () => answers[Math.min(n++, answers.length - 1)]();
+  };
+
+  it("is told once what was wrong with a free text answer, and finishes when the next one is right", async () => {
+    const r = await rig({ answer: script(() => sse({ choices: [{ delta: { content: "All quiet." } }] }), () => sse(...toolAnswer(GOOD))) });
+    await r.reviews.start();
+    await r.reviews.idle();
+    const review = r.reviews.list()[0];
+    assert.equal(review.status, "done");
+    assert.equal(review.answerExcerpt, null);
+    assert.equal(r.requests.length, 2);
+    const last = r.requests[1].body.messages.at(-1);
+    assert.equal(last.role, "user");
+    assert.match(last.content, new RegExp(REPORT_TOOL));
+  });
+
+  it("is told once what did not fit in a report, as the result of its call", async () => {
+    const bad = { summary: "x", observations: [{ level: "catastrophic", sites: [], title: "t", explanation: "e", evidence: [] }] };
+    const r = await rig({ answer: script(() => sse(...toolAnswer(bad)), () => sse(...toolAnswer(GOOD))) });
+    await r.reviews.start();
+    await r.reviews.idle();
+    assert.equal(r.reviews.list()[0].status, "done");
+    const messages = r.requests[1].body.messages;
+    assert.equal(messages.at(-2).role, "assistant");
+    assert.equal(messages.at(-1).role, "tool");
+    assert.match(JSON.parse(messages.at(-1).content).error, /Observation 1/);
+  });
+
+  it("fails when the second answer is no better, and keeps the start of it", async () => {
+    const r = await rig({ answer: () => sse(...toolAnswer('{"summary":"x","observations":"nothing"}')) });
+    await r.reviews.start();
+    await r.reviews.idle();
+    const review = r.reviews.list()[0];
+    assert.equal(review.status, "failed");
+    assert.equal(r.requests.length, 2);
+    assert.match(review.failure ?? "", /must be a JSON list/);
+    assert.equal(review.answerExcerpt, '{"summary":"x","observations":"nothing"}');
+  });
+
+  it("keeps no more than the start of a long answer", async () => {
+    const r = await rig({ answer: () => sse({ choices: [{ delta: { content: "x".repeat(5000) } }] }) });
+    await r.reviews.start();
+    await r.reviews.idle();
+    assert.ok((r.reviews.list()[0].answerExcerpt ?? "").length <= 2003);
+  });
+
+  it("is not corrected twice", async () => {
+    const answers = [() => sse({ choices: [{ delta: { content: "a" } }] }), () => sse(...toolAnswer('{"summary":"x","observations":5}')), () => sse(...toolAnswer(GOOD))];
+    const r = await rig({ answer: script(...answers) });
+    await r.reviews.start();
+    await r.reviews.idle();
+    assert.equal(r.reviews.list()[0].status, "failed");
+    assert.equal(r.requests.length, 2);
+  });
+
+  it("accepts a list written as a string of JSON", async () => {
+    const observation = GOOD.observations[0];
+    const stringy = { summary: "s", observations: JSON.stringify([{ ...observation, sites: JSON.stringify(observation.sites), evidence: JSON.stringify(observation.evidence) }]) };
+    const r = await rig({ answer: () => sse(...toolAnswer(stringy)) });
+    await r.reviews.start();
+    await r.reviews.idle();
+    const review = r.reviews.list()[0];
+    assert.equal(review.status, "done");
+    assert.deepEqual(review.observations, GOOD.observations);
+  });
+});
+
+describe("what a Review pays for", () => {
+  const linesAnswer = (args: unknown, id: string) => sse({ choices: [{ delta: { tool_calls: [{ index: 0, id, function: { name: LINES_TOOL, arguments: JSON.stringify(args) } }] } }] }, { choices: [], usage: { prompt_tokens: 100, completion_tokens: 10 } });
+  const many = Array.from({ length: 30 }, (_, i) => entry(T0 + (i + 1) * 60_000, 404, `/p${i % 4}`, "203.0.113.9"));
+
+  it("replaces rows the model has read with their summary, and keeps the newest answer whole", async () => {
+    const answers = [() => linesAnswer({ host: "app.example.test", view: "rows" }, "a"), () => linesAnswer({ host: "app.example.test", view: "rows", limit: 10 }, "b"), () => sse(...toolAnswer(GOOD))];
+    let n = 0;
+    const r = await rig({ lines: many, answer: () => answers[n++]() });
+    await r.reviews.start();
+    await r.reviews.idle();
+    assert.equal(r.reviews.list()[0].status, "done");
+    const tools = (request: any) => request.body.messages.filter((m: any) => m.role === "tool").map((m: any) => JSON.parse(m.content));
+    assert.equal(tools(r.requests[1]).length, 1);
+    assert.equal(tools(r.requests[1])[0].rows.length, 20, "the model sees the rows once, whole");
+    const third = tools(r.requests[2]);
+    assert.equal(third.length, 2);
+    assert.equal(third[0].rows, 20, "the rows of the earlier round are now a count");
+    assert.ok(third[0].topPaths.length <= 3);
+    assert.equal(third[1].rows.length, 10, "the latest round is whole");
+  });
+
+  it("does not replace a summary, which is small already", async () => {
+    const answers = [() => linesAnswer({ host: "app.example.test" }, "a"), () => linesAnswer({ host: "app.example.test", status: [404] }, "b"), () => sse(...toolAnswer(GOOD))];
+    let n = 0;
+    const r = await rig({ lines: many, answer: () => answers[n++]() });
+    await r.reviews.start();
+    await r.reviews.idle();
+    const tools = r.requests[2].body.messages.filter((m: any) => m.role === "tool").map((m: any) => JSON.parse(m.content));
+    assert.deepEqual(tools.map((t: any) => t.view), ["summary", "summary"]);
+    assert.equal(tools[0].matched, 30);
+  });
+
+  it("records a summary as a request with its view, and the lines it counted", async () => {
+    let n = 0;
+    const answers = [() => linesAnswer({ host: "app.example.test" }, "a"), () => sse(...toolAnswer(GOOD))];
+    const r = await rig({ lines: many, answer: () => answers[n++]() });
+    await r.reviews.start();
+    await r.reviews.idle();
+    const [requested] = r.reviews.list()[0].linesRequested;
+    assert.equal(requested.request.view, "summary");
+    assert.equal(requested.rows, 30);
+  });
+
+  it("allows only a fixed number of rows in all, then asks for the report", async () => {
+    const rowsCall = (id: string) => () => linesAnswer({ host: "app.example.test", view: "rows", limit: 50 }, id);
+    const answers = [rowsCall("a"), rowsCall("b"), rowsCall("c"), rowsCall("d"), () => sse(...toolAnswer(GOOD))];
+    let n = 0;
+    const lines = Array.from({ length: 80 }, (_, i) => entry(T0 + (i + 1) * 60_000, 404, `/p${i}`, "203.0.113.9"));
+    const r = await rig({ lines, answer: () => answers[n++]() });
+    await r.reviews.start();
+    await r.reviews.idle();
+    const review = r.reviews.list()[0];
+    assert.equal(review.status, "done");
+    assert.deepEqual(review.linesRequested.map((l) => l.rows), [50, 50, 50]);
+    const last = r.requests.at(-1)!.body.messages.filter((m: any) => m.role === "tool").at(-1);
+    assert.match(JSON.parse(last.content).error, /used up/);
+  });
+
+  it("tells the model in the prompt to start with the summary", async () => {
+    const r = await rig();
+    await r.reviews.start();
+    await r.reviews.idle();
+    assert.match(r.requests[0].body.messages[0].content, /first ask for its summary/);
+  });
+});
+
+describe("how much of the period Caddy still had", () => {
+  it("is recorded when lines were rotated away, as the time from the oldest line kept to the end", async () => {
+    const r = await rig({ lines: [entry(T0 + 20 * HOUR, 200, "/", "198.51.100.1"), entry(T0 + 21 * HOUR, 200, "/", "198.51.100.1")] });
+    await r.reviews.start();
+    await r.reviews.idle();
+    const { coverage } = r.reviews.list()[0];
+    assert.ok(coverage.sites.length > 0);
+    assert.equal(coverage.retainedMs, NOW - (T0 + 20 * HOUR));
+  });
+
+  it("is not recorded for a Site that simply had no lines in the period", async () => {
+    const r = await rig({ lines: [entry(T0 - 5 * HOUR, 200, "/", "198.51.100.1")] });
+    await r.reviews.start();
+    await r.reviews.idle();
+    assert.equal(r.reviews.list()[0].coverage.retainedMs, undefined);
+  });
+
+  it("is absent when the whole period was there", async () => {
+    const r = await rig({ lines: [entry(T0, 200, "/", "198.51.100.1")] });
+    await r.reviews.start();
+    await r.reviews.idle();
+    assert.equal(r.reviews.list()[0].coverage.retainedMs, undefined);
   });
 });
 
