@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { createAuth, loadSecret, parseTrustProxy } from "./auth.js";
 import { AlertSettings, type Patch, type RouteMap, type TopicPatch } from "./alert-settings.js";
 import { listModels, testConnection, testToolCalling } from "./ai-endpoint.js";
+import { createLookup } from "./assistant-lookup.js";
 import { checkTurnBody, startConversationTurn } from "./conversation-turn.js";
 import { Conversations, placeholderKey } from "./conversations.js";
 import { AI_TASKS, AiSettings, type AiPatch, type AiTask } from "./ai-settings.js";
@@ -391,7 +392,7 @@ export async function createApp(config: Config, onShutdown: Array<() => Promise<
     const checked = checkTurnBody(await c.req.json().catch(() => null));
     if (!checked.ok) return c.json(checked, 400);
     const controller = new AbortController();
-    const deps = { endpoint: aiSettings.effective(), model, validate: async (text: string) => (await deployer.validate(text)).findings, signal: controller.signal };
+    const deps = { endpoint: aiSettings.effective(), model, lookup: createLookup({ loadLive: liveLogConfig, logDir: config.logDir }), validate: async (text: string) => (await deployer.validate(text)).findings, signal: controller.signal };
     const started = startConversationTurn(conversations, deps, checked.body);
     if (!started.ok) return c.json({ ok: false, error: started.error }, started.status);
     return streamSSE(c, async (stream) => {

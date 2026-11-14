@@ -11,11 +11,13 @@ import {
   logsParams,
   formatTokens,
   groupByLevel,
+  groupUnseen,
   linesRequestedLabel,
   LEVEL_LABELS,
   periodLabel,
   reviewFixPrompt,
   SKIP_REASONS,
+  retentionNotice,
   stampLabel,
   UNSEEN_REASONS,
   type Observation,
@@ -92,7 +94,8 @@ function ObservationCard({ observation, review, links }: { observation: Observat
 export function ReviewDrawer({ review, links, onAskAssistant, onClose }: { review: Review; links: LinkContext; onAskAssistant?: (message: string) => void; onClose: () => void }) {
   const fixPrompt = onAskAssistant ? reviewFixPrompt(review) : null
   const groups = groupByLevel(review.observations)
-  const unseen = review.coverage.sites.flatMap((site) => site.unseen.map((part) => ({ ...part, site: site.site })))
+  const unseen = groupUnseen(review.coverage.sites.flatMap((site) => site.unseen.map((part) => ({ ...part, site: site.site }))))
+  const retention = retentionNotice(review)
   const gaps = review.coverage.gaps ?? []
   return (
     <SideDrawer
@@ -175,9 +178,10 @@ export function ReviewDrawer({ review, links, onAskAssistant, onClose }: { revie
           </Section>
         )}
 
-        {(unseen.length > 0 || gaps.length > 0 || review.coverage.skipped.length > 0) && (
+        {(unseen.length > 0 || gaps.length > 0 || review.coverage.skipped.length > 0 || retention) && (
           <Section title="What could not be seen">
             <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+              {retention && <li>{retention}</li>}
               {gaps.map((gap, index) => (
                 <li key={`g${index}`}>
                   {stampLabel(gap.from)} to {stampLabel(gap.to)}. Fairway ran no Review in this time.
@@ -185,7 +189,7 @@ export function ReviewDrawer({ review, links, onAskAssistant, onClose }: { revie
               ))}
               {unseen.map((part, index) => (
                 <li key={`u${index}`}>
-                  <span className="font-mono">{part.site}</span>: {stampLabel(part.from)} to {stampLabel(part.to)}. {UNSEEN_REASONS[part.reason]}.
+                  <span className="font-mono">{part.sites.join(", ")}</span>: {stampLabel(part.from)} to {stampLabel(part.to)}. {UNSEEN_REASONS[part.reason]}.
                 </li>
               ))}
               {review.coverage.skipped.map((site, index) => (

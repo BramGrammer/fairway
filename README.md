@@ -164,7 +164,12 @@ Read this before switching either feature on. Everything below is sent to the en
 - its Findings, with the same replacement in their text,
 - the Conversation so far (your messages and its answers; an earlier Proposal as a one-line note, not its text).
 
-It is sent nothing else: no Events, no Access logs, no Certificates.
+**Assistant, only when it looks something up** (it decides, from your question; the trace under its answer lists each look):
+
+- the **running routes** of one Site (`get_routes`): hosts, what each rule matches, the middleware on it and where it sends the request, with the same secret replacement,
+- the **Access log** of one Site for the last 7 days (`get_log_lines`): first a summary (counts per status, path, client address and user agent), and individual lines only for a narrow filter. A line is time, status, method, path without its query string, client address, size and user agent. Headers, cookies and the raw line are never sent.
+
+It is sent nothing else: no Events, no Certificates, no other files.
 
 **Which secrets are recognised.** Fairway reads the text for exactly these, and nothing wider:
 
@@ -185,15 +190,15 @@ It is sent nothing else: no Events, no Access logs, no Certificates.
 
 ### What the AI cannot do
 
-- **The Assistant never reloads and never deploys.** A Proposal only changes the editor when you accept it. You then Deploy through the usual Validation, confirmation of warnings and Reload ([How a save works](#how-a-save-works)). It has no tool for anything else. It is also a model: a Proposal can be valid and still be wrong (the right syntax on the wrong Site), so read the difference.
+- **The Assistant never reloads and never deploys.** A Proposal only changes the editor when you accept it. You then Deploy through the usual Validation, confirmation of warnings and Reload ([How a save works](#how-a-save-works)). Its other tools only read. It is also a model: a Proposal can be valid and still be wrong (the right syntax on the wrong Site), so read the difference.
 - **A Review is read-only.** It never touches the Caddyfile, and the only thing it can write is its own record of Observations.
-- **Log text is written by outsiders** and Fairway tells the model to treat it as data. A model can still be talked into things. The worst a successful injection can do is hide an Observation or invent one, so do not rely on a Review as your only alarm.
+- **Log text is written by outsiders** and Fairway tells the model to treat it as data. A model can still be talked into things. For a Review the worst a successful injection can do is hide an Observation or invent one, so do not rely on a Review as your only alarm. The Assistant can read log text too and can propose changes, so a planted line could try to steer a Proposal; that is one more reason to read the difference before you accept it.
 
 ### How it behaves
 
 - **Validation of drafts.** Before a Proposal is shown it goes through Validation and the model gets the Findings back to correct itself, three attempts at most. After that it is shown anyway, marked as not valid (the button reads "Accept anyway"), because a near miss can still help. One Proposal is pending at a time; a follow-up message revises it, and if the editor changes underneath it is marked outdated and cannot be accepted.
-- **Limits per Assistant turn:** 6 tool calls, and an answer of at most 4,000 tokens. The Caddyfile may be at most 200,000 characters, and a Conversation at most 80 messages or 60,000 characters before you must start a new one. At most 200 Conversations are kept.
-- **Limits per Review:** 8 requests for log lines of at most 100 lines, an answer of at most 4,000 tokens, 256 MiB of log read (the oldest part of the period is dropped first) and 5 minutes in all.
+- **Limits per Assistant turn:** 6 edit tool calls, 5 lookups (60 log lines in all), and an answer of at most 4,000 tokens. The Caddyfile may be at most 200,000 characters, and a Conversation at most 80 messages or 60,000 characters before you must start a new one. At most 200 Conversations are kept.
+- **Limits per Review:** 8 requests for log lines (a summary, or at most 50 lines each and 150 in all), an answer of at most 4,000 tokens, 256 MiB of log read (the oldest part of the period is dropped first) and 5 minutes in all.
 - **Usage.** Tokens read and written are shown under each Assistant answer and as a Conversation total, and in the Tokens column and the details of each Review. Fairway shows tokens, not money; the endpoint's own dashboard has the cost.
 - **Schedule** (Settings › AI › Reviews run): off, every 6 hours, every 12 hours, every 24 hours (the default) or weekly, and **Review now** in the Reviews tab. It runs inside Fairway, about 2 minutes after a start, and needs a model for Reviews and a login. A Review covers the time since the previous successful one (the last 24 hours for the first), for at most 31 days. Fairway keeps no copy of the logs, so what Caddy has rotated away, or beyond the read limit, or a Site without a readable Access log, is listed in the Review under "What could not be seen" and not judged.
 - **Alerts.** A Review that finds something new at or above the level in **Settings › Alerts** (default urgent) records one Event, which sends one Alert when topics are set up (see [History and alerts](#history-and-alerts)).

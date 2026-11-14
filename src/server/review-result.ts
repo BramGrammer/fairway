@@ -81,6 +81,20 @@ export const RESULT_SCHEMA: Record<string, unknown> = {
   },
 };
 
+/**
+ * Some models write a list as a string of JSON instead of a list. That is unambiguous, so it is accepted; anything
+ * else that is not a list stays as it was and is rejected by the caller.
+ */
+function asList(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : value;
+  } catch {
+    return value;
+  }
+}
+
 type Parsed = { ok: true; result: ReviewResult } | { ok: false; error: string };
 
 const text = (value: unknown, max: number): string | null => (typeof value === "string" && value.trim() !== "" && value.length <= max ? value.trim() : null);
@@ -113,9 +127,11 @@ function parseObservation(value: unknown): Observation | null {
   const title = text(value.title, LIMITS.title);
   const explanation = text(value.explanation, LIMITS.explanation);
   if (!level || !title || !explanation) return null;
-  if (!Array.isArray(value.sites) || value.sites.length > LIMITS.sites || !Array.isArray(value.evidence) || value.evidence.length > LIMITS.evidence) return null;
-  const sites = value.sites.map((site) => text(site, LIMITS.host));
-  const evidence = value.evidence.map(parseEvidence);
+  const siteList = asList(value.sites);
+  const evidenceList = asList(value.evidence);
+  if (!Array.isArray(siteList) || siteList.length > LIMITS.sites || !Array.isArray(evidenceList) || evidenceList.length > LIMITS.evidence) return null;
+  const sites = siteList.map((site) => text(site, LIMITS.host));
+  const evidence = evidenceList.map(parseEvidence);
   if (sites.includes(null) || evidence.includes(null)) return null;
   return { level, sites: sites as string[], title, explanation, evidence: evidence as Evidence[], ...(value.ongoing !== undefined && { ongoing: value.ongoing as boolean }) };
 }
@@ -131,9 +147,11 @@ export function parseReviewResult(argumentsText: string): Parsed {
   if (!isRecord(data) || !onlyKeys(data, ["summary", "observations"])) return { ok: false, error: "The model's answer did not have the fixed structure (a summary and a list of observations)." };
   const summary = text(data.summary, LIMITS.summary);
   if (!summary) return { ok: false, error: "The model's answer had no usable summary." };
-  if (!Array.isArray(data.observations) || data.observations.length > LIMITS.observations) return { ok: false, error: "The model's answer had no usable list of observations." };
+  const list = asList(data.observations);
+  if (!Array.isArray(list)) return { ok: false, error: `The model's answer had no usable list of observations: "observations" must be a JSON list, and was ${list === null ? "null" : typeof list}.` };
+  if (list.length > LIMITS.observations) return { ok: false, error: `The model's answer had no usable list of observations: it had ${list.length}, and ${LIMITS.observations} is the most.` };
   const observations: Observation[] = [];
-  for (const [index, item] of data.observations.entries()) {
+  for (const [index, item] of list.entries()) {
     const observation = parseObservation(item);
     if (!observation) return { ok: false, error: `Observation ${index + 1} in the model's answer did not fit the fixed structure.` };
     observations.push(observation);
